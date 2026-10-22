@@ -32,4 +32,5 @@
 
 - `tools/build-vocab-extra.js`：从公开词库补充 300 个词条
 - `tools/build-vocab-detail.js`：生成 1,473 条完整词条卡
+- `tools/build-bundle.js`：把线上数据脚本合并为 `data/all-data.js`，减少首屏请求
 - `node build-single.js`：重建单文件版
