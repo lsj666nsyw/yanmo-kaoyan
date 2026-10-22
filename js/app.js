@@ -3114,7 +3114,7 @@
           else upsertMistake({
             key: "cloze-" + active.index + "-" + i,
             type: "完形",
-            source: "完形 · " + set.title,
+            source: set.title,
             stem: blankContext(set.paragraphs, i + 1),
             your: picked != null ? letter(picked) : "—",
             answer: letter(item.answer),
@@ -3167,7 +3167,7 @@
           else upsertMistake({
             key: "seven-" + active.index + "-" + i,
             type: "七选五",
-            source: "七选五 · " + set.title,
+            source: set.title,
             stem: blankContext(set.paragraphs, i + 1),
             your: picked != null ? letter(picked) : "—",
             answer: letter(correct),
@@ -3223,7 +3223,7 @@
             upsertMistake({
               key: "order-" + active.index + "-" + i,
               type: "排序",
-              source: "排序题 · " + set.title,
+              source: set.title,
               stem: "接在 " + prev + " 之后（第 " + (i + 2) + " 段）应选哪一段？",
               your: picked || "—",
               answer: correct,
@@ -3279,7 +3279,7 @@
           else upsertMistake({
             key: "heading-" + active.index + "-" + i,
             type: "小标题",
-            source: "小标题 · " + set.title,
+            source: set.title,
             stem: set.sections[i].slice(0, 110) + (set.sections[i].length > 110 ? "…" : ""),
             your: picked != null ? letter(picked) : "—",
             answer: letter(correct),
