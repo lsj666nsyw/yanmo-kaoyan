@@ -1,0 +1,35 @@
+/* 核心词库 · 扩充 30 条精讲
+   字段同 vocab.js：w 单词 / ph 音标 / pos 词性 / cn 释义 / ex 例句 / exCn 译文 / tag 分类 / note 搭配与考点 */
+
+window.VOCAB = (window.VOCAB || []).concat([
+  {w:"mitigate",ph:"ˈmɪtɪɡeɪt",pos:"v.",cn:"减轻；缓和",ex:"The city planted trees along the hottest streets to mitigate the effects of extreme heat.",exCn:"这座城市在最热的街道旁植树，以减轻极端高温的影响。",tag:"高频",note:"mitigate a risk / impact；mitigation 缓解措施；不要与 militate（起作用、妨碍）混淆"},
+  {w:"incentive",ph:"ɪnˈsentɪv",pos:"n.",cn:"激励；动机",ex:"The policy offers a tax incentive to firms that train young workers.",exCn:"该政策为培训年轻员工的企业提供税收激励。",tag:"高频",note:"an incentive to do sth；incentivize 激励；与 motivation 相比更强调外部诱因"},
+  {w:"infrastructure",ph:"ˈɪnfrəstrʌktʃə(r)",pos:"n.",cn:"基础设施",ex:"Housing cannot expand without transport, water and power infrastructure.",exCn:"没有交通、供水和电力基础设施，住房就无法扩张。",tag:"高频",note:"不可数名词；digital / social infrastructure；infrastructural 基础设施的"},
+  {w:"volatile",ph:"ˈvɒlətaɪl",pos:"a.",cn:"不稳定的；易变的",ex:"Food prices became more volatile after the harvest failed.",exCn:"歉收之后，食品价格变得更加不稳定。",tag:"高频",note:"volatile market / mood；volatility 波动性；化学语境中意为“易挥发的”"},
+  {w:"notion",ph:"ˈnəʊʃn",pos:"n.",cn:"观念；想法",ex:"The notion that longer hours mean more output is rarely tested.",exCn:"“工时越长产出越多”这一观念很少受到检验。",tag:"高频",note:"the notion that ...；have no notion of 对……一无所知；比 idea 更偏“成见、观念”"},
+  {w:"compelling",ph:"kəmˈpelɪŋ",pos:"a.",cn:"有说服力的；引人入胜的",ex:"The report offers a compelling case for treating sleep as part of public health.",exCn:"这份报告为把睡眠纳入公共卫生提供了有说服力的理由。",tag:"高频",note:"compelling evidence / reason；compel 迫使；compelling 也可指“引人入胜的”"},
+  {w:"cumulative",ph:"ˈkjuːmjələtɪv",pos:"a.",cn:"累积的；渐增的",ex:"The cumulative effect of small delays can be a missed deadline.",exCn:"一次次小延误累积起来，可能导致错过截止日期。",tag:"核心",note:"cumulative impact / effect；accumulate 积累；cumulative 强调“累加后的总量”"},
+  {w:"deduce",ph:"dɪˈdjuːs",pos:"v.",cn:"推断；演绎",ex:"From the pattern of errors, the researchers deduced that the instructions were unclear.",exCn:"从错误出现的规律，研究者推断说明文字不够清楚。",tag:"核心",note:"deduce sth from sth；deduction 推论；与 induce（归纳）相对"},
+  {w:"disparity",ph:"dɪˈspærəti",pos:"n.",cn:"差距；悬殊",ex:"The disparity between urban and rural school funding has widened.",exCn:"城乡学校经费的差距已经扩大。",tag:"高频",note:"disparity between A and B；disparate 迥然不同的；常与 widen / narrow 搭配"},
+  {w:"elicit",ph:"ɪˈlɪsɪt",pos:"v.",cn:"引出；诱出",ex:"The question elicited a longer answer than the interviewer had expected.",exCn:"这个问题引出的回答比采访者预想的更长。",tag:"核心",note:"elicit a response / reaction；与 illicit（非法的）拼写相近，注意区分"},
+  {w:"impose",ph:"ɪmˈpəʊz",pos:"v.",cn:"强加；征收",ex:"Cities that impose strict parking rules must offer alternatives.",exCn:"实施严格停车规定的城市必须提供替代方案。",tag:"高频",note:"impose sth on sb；impose a fine / tax；imposing 也可指“壮观的”"},
+  {w:"infer",ph:"ɪnˈfɜː(r)",pos:"v.",cn:"推断；推论",ex:"Readers infer the author's attitude from the words she chooses.",exCn:"读者从作者选用的词语推断她的态度。",tag:"高频",note:"infer sth from sth；infer 是读者/听者的动作，imply 是作者/说话者的动作"},
+  {w:"intrinsic",ph:"ɪnˈtrɪnsɪk",pos:"a.",cn:"内在的；固有的",ex:"The intrinsic value of a forest is not captured by its timber price.",exCn:"森林的内在价值并不能由木材价格体现。",tag:"核心",note:"intrinsic to sth；intrinsic motivation 内在动机；与 extrinsic 相对"},
+  {w:"paradox",ph:"ˈpærədɒks",pos:"n.",cn:"悖论；矛盾现象",ex:"The paradox is that more choice can make decisions harder.",exCn:"悖论在于，选择越多，决定反而可能越难。",tag:"高频",note:"the paradox that ...；paradoxical 自相矛盾的；常用于解释反直觉现象"},
+  {w:"pragmatic",ph:"præɡˈmætɪk",pos:"a.",cn:"务实的；讲求实际的",ex:"A pragmatic response would start with the cheapest measures.",exCn:"务实的做法会从成本最低的措施开始。",tag:"核心",note:"pragmatic approach；pragmatism 实用主义；与 idealistic 相对"},
+  {w:"reluctance",ph:"rɪˈlʌktəns",pos:"n.",cn:"不情愿；勉强",ex:"There is widespread reluctance to raise taxes, even for popular services.",exCn:"即便用于广受欢迎的服务，增税也普遍不受欢迎。",tag:"核心",note:"reluctance to do sth；reluctant 不情愿的；with reluctance 勉强地"},
+  {w:"resilient",ph:"rɪˈzɪliənt",pos:"a.",cn:"有韧性的；能恢复的",ex:"Diverse economies are more resilient to a downturn in one industry.",exCn:"多元化的经济体更能承受某一行业衰退的冲击。",tag:"高频",note:"resilient to sth；resilience 韧性；常用于生态、经济、心理语境"},
+  {w:"underlying",ph:"ˌʌndəˈlaɪɪŋ",pos:"a.",cn:"潜在的；根本的",ex:"Treating the symptom will not remove the underlying cause.",exCn:"只治症状并不能消除根本原因。",tag:"高频",note:"underlying cause / assumption；underlie 构成……的基础"},
+  {w:"exacerbate",ph:"ɪɡˈzæsəbeɪt",pos:"v.",cn:"加剧；使恶化",ex:"Shortages were exacerbated by the decision to close the border.",exCn:"关闭边境的决定加剧了物资短缺。",tag:"高频",note:"exacerbate a problem；与 exaggerate（夸大）形近义远，考试常设混淆"},
+  {w:"formulate",ph:"ˈfɔːmjuleɪt",pos:"v.",cn:"制定；系统表述",ex:"The committee took months to formulate a policy that could be defended.",exCn:"委员会花了几个月才制定出一项站得住脚的政策。",tag:"核心",note:"formulate a plan / question；formulation 表述方式"},
+  {w:"illustrate",ph:"ˈɪləstreɪt",pos:"v.",cn:"说明；举例说明",ex:"The case illustrates how quickly a local decision can become national news.",exCn:"这个案例说明，一个地方决定可以多快变成全国新闻。",tag:"高频",note:"illustrate a point；illustration 例证；作“加插图”讲时也用于书籍"},
+  {w:"imply",ph:"ɪmˈplaɪ",pos:"v.",cn:"暗示；意味着",ex:"The data imply a link, but they do not prove one.",exCn:"数据暗示存在关联，但并未证明这种关联。",tag:"高频",note:"imply 是说话者/作者的暗示；infer 是听者/读者的推断；implication 含义、影响"},
+  {w:"indicate",ph:"ˈɪndɪkeɪt",pos:"v.",cn:"表明；指示",ex:"Early results indicate that the programme is reaching the intended families.",exCn:"初步结果表明，该项目正在覆盖目标家庭。",tag:"高频",note:"indicate that ...；indication 迹象；在图表作文中常用于描述数据"},
+  {w:"initiate",ph:"ɪˈnɪʃieɪt",pos:"v.",cn:"发起；启动",ex:"The university initiated a review after students raised concerns.",exCn:"学生提出关切后，校方启动了一项审查。",tag:"核心",note:"initiate a process / reform；initiative 倡议、主动性；initiate sb into 使入门"},
+  {w:"interpret",ph:"ɪnˈtɜːprɪt",pos:"v.",cn:"解释；理解；口译",ex:"The same silence can be interpreted as agreement or as fear.",exCn:"同样的沉默可以被理解为同意，也可以被理解为恐惧。",tag:"高频",note:"interpret A as B；interpretation 解释；interpreter 口译者"},
+  {w:"intervene",ph:"ˌɪntəˈviːn",pos:"v.",cn:"干预；介入",ex:"Governments rarely intervene until the damage is visible.",exCn:"政府很少在损害显现之前介入。",tag:"核心",note:"intervene in sth；intervention 干预；intervene between 调停"},
+  {w:"isolate",ph:"ˈaɪsəleɪt",pos:"v.",cn:"使隔离；孤立；分离出",ex:"It is difficult to isolate the effect of one policy from the wider economy.",exCn:"很难把一项政策的效果从更广泛的经济影响中分离出来。",tag:"高频",note:"isolate A from B；isolation 隔离；isolated 偏远的、孤立的"},
+  {w:"prioritize",ph:"praɪˈɒrətaɪz",pos:"v.",cn:"优先处理；排序",ex:"A budget is a way of prioritizing, whether or not anyone admits it.",exCn:"预算本身就是一种排序，无论有没有人承认。",tag:"高频",note:"prioritize A over B；priority 优先事项；英式拼写 prioritise"},
+  {w:"inclined",ph:"ɪnˈklaɪnd",pos:"a.",cn:"倾向于……的；有意的",ex:"Investors are more inclined to fund projects with a visible timetable.",exCn:"投资者更愿意资助时间表清晰的项目。",tag:"核心",note:"be inclined to do sth；inclination 倾向；be inclined to think that ..."},
+  {w:"notwithstanding",ph:"ˌnɒtwɪθˈstændɪŋ",pos:"prep./ad.",cn:"尽管；虽然",ex:"Notwithstanding the criticism, the programme was extended for another year.",exCn:"尽管受到批评，该项目还是延长了一年。",tag:"核心",note:"可置于句首或句末，较正式；notwithstanding the fact that ... 亦可"}
+]);
