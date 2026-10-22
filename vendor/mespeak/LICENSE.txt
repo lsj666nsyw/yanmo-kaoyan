@@ -1,0 +1,11 @@
+/* meSpeak 离线语音许可说明
+ *
+ * 本目录中的 mespeak.js、mespeak-core.js 与 voice-en-us.js 来自 meSpeak
+ * (https://www.masswerk.at/mespeak/)，基于 eSpeak 与 speak.js。
+ *
+ * meSpeak 与 eSpeak 以 GNU General Public License 发布。
+ * 完整许可证文本请见：https://www.gnu.org/licenses/gpl-3.0.txt
+ * 源代码与修改说明见本目录 README.md。
+ *
+ * 本应用未修改 eSpeak 的合成算法；仅调整了前端加载方式以支持 file:// 与单文件版。
+ */

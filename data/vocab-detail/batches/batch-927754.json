@@ -1,0 +1,82 @@
+{
+  "considerable": {
+    "use": "形容词，表示相当大的或可观的程度，正式程度中等，常见句型为‘a considerable amount of sth’或‘considerable time/money’",
+    "phr": [
+      "considerable amount 可观的数量",
+      "considerable progress 相当大的进步"
+    ],
+    "ex": "The project required considerable time and money, and the team made considerable progress in the end.",
+    "exCn": "该项目需要相当多的时间和金钱，最后团队取得了相当大的进步。",
+    "deep": "注意不要与‘considerate’混淆，后者表示体贴或关心，而‘considerable’强调的是数量或程度的大小。"
+  },
+  "consist": {
+    "use": "动词，表示由某些部分组成或在于某一点，正式程度中等，常见句型为‘sth consists of sth’或‘consist in doing sth’",
+    "phr": [
+      "consist of 由…组成",
+      "consist in 在于"
+    ],
+    "ex": "The course consists of twelve lectures and four seminars, and the success of the project consists in careful planning.",
+    "exCn": "该课程由十二讲和四个研讨会组成，而项目的成功在于仔细的规划。",
+    "deep": "要注意‘consist of’和‘consist in’的区别，前者表示组成部分，后者表示某事物的关键或核心在于某一点。"
+  },
+  "constant": {
+    "use": "形容词，表示不断的或恒定的状态，正式程度中等，常见句型为‘constant noise’或‘constant change’",
+    "phr": [
+      "constant noise 不断的噪音",
+      "constant effort 持续的努力"
+    ],
+    "ex": "The constant noise made concentration impossible, but constant effort eventually led to success.",
+    "exCn": "不断的噪音使集中注意力变得不可能，但是持续的努力最终带来了成功。",
+    "deep": "注意不要与‘constantly’混淆，后者表示不断地或经常地发生某事，而‘constant’描述的是状态或性质。"
+  },
+  "constitute": {
+    "use": "动词，表示构成或组成某事物，正式程度中等，常见句型为‘sth constitutes sth’或‘women constitute a large part of the workforce’",
+    "phr": [
+      "constitute a majority 构成多数",
+      "constitute a threat 构成威胁"
+    ],
+    "ex": "Women constitute nearly half of the workforce, and their contributions constitute a significant part of the country’s economy.",
+    "exCn": "女性构成了几乎工人的一半，他们的贡献构成了国家经济的重要部分。",
+    "deep": "要注意‘constitute’和‘constitution’的区别，后者可以指宪法或体质，而‘constitute’强调的是组成或构成的意义。"
+  },
+  "constraint": {
+    "use": "名词，表示限制或约束，正式程度中等，常见句型为‘time constraints’或‘financial constraints’",
+    "phr": [
+      "time constraints 时间限制",
+      "financial constraints 财务约束"
+    ],
+    "ex": "Time constraints prevented a full investigation, and financial constraints limited the scope of the project.",
+    "exCn": "时间限制阻止了对案件的全面调查，而财务约束则限制了项目的范围。",
+    "deep": "注意不要与‘constrain’混淆，后者表示限制或迫使某事发生，而‘constraint’描述的是限制或约束的状态。"
+  },
+  "consume": {
+    "use": "动词，表示消耗或消费，正式程度中等，常见句型为‘consume energy’或‘consume a lot of time’",
+    "phr": [
+      "consume energy 消耗能量",
+      "consume a lot of time 消耗大量时间"
+    ],
+    "ex": "Households consume far more energy in winter, which can consume a significant part of their budget.",
+    "exCn": "家庭在冬季消耗了远多的能量，这可能会消耗他们预算的一大部分。",
+    "deep": "要注意‘consume’和‘consumer’的区别，后者指消费者，而‘consume’强调的是消耗或消费的行为。"
+  },
+  "contemporary": {
+    "use": "形容词或名词，表示当代的或同时代的，正式程度中等，常见句型为‘contemporary art’或‘a contemporary of someone’",
+    "phr": [
+      "contemporary art 当代艺术",
+      "a contemporary of someone 某人同时代的人"
+    ],
+    "ex": "The novel speaks to contemporary anxieties about technology, and the artist is a contemporary of the famous writer.",
+    "exCn": "这部小说反映了当代人对技术的焦虑，而这位艺术家是著名作家同时代的人。",
+    "deep": "注意不要与‘contemporary with’混淆，后者表示与某人同时代，而‘contemporary’描述的是当代或同时代的性质。"
+  },
+  "contend": {
+    "use": "动词，表示主张、竞争或应付，正式程度中等，常见句型为‘contend that’或‘contend with’",
+    "phr": [
+      "contend that 主张",
+      "contend with 应付"
+    ],
+    "ex": "Critics contend that the reform will hurt the poorest, and the team had to contend with numerous challenges during the project.",
+    "exCn": "批评者主张改革将伤害最贫穷的人，而团队在项目过程中不得不应付无数挑战。",
+    "deep": "要注意‘contend’和‘contention’的区别，后者指争论或争议，而‘contend’强调的是主张、竞争或应付的行为。"
+  }
+}

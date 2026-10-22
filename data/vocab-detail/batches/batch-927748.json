@@ -1,0 +1,82 @@
+{
+  "abandon": {
+    "use": "vt. 放弃；抛弃；沉溺于（abandon oneself to）。正式程度中等，常见于正式文本。",
+    "phr": [
+      "abandon oneself to 沉溺于",
+      "abandon hope 放弃希望"
+    ],
+    "ex": "The government abandoned its plans to build a new airport due to environmental concerns.",
+    "exCn": "由于环保问题，政府放弃了建设新机场的计划。",
+    "deep": "abandon 和 give up 都有“放弃”之意，但 abandon 更强调彻底放弃，而 give up 更常见于日常用语。"
+  },
+  "assure": {
+    "use": "vt. 向…保证；使确信。正式程度中等，常见于正式文本。常见句型：assure sb that；assure sb of sth。",
+    "phr": [
+      "assure sb that 向某人保证某事",
+      "assure sb of sth 向某人保证某事物"
+    ],
+    "ex": "The manager assured the team that their efforts would not go unnoticed.",
+    "exCn": "经理向团队保证，他们的努力不会被忽视。",
+    "deep": "assure 和 ensure 的区别在于：assure 侧重使人确信，而 ensure 侧重确保某事发生。"
+  },
+  "attach": {
+    "use": "vt. 附上；重视；使依附。正式程度中等，常见于正式文本。常见句型：attach importance to；be attached to。",
+    "phr": [
+      "attach importance to 重视",
+      "be attached to 依恋"
+    ],
+    "ex": "Please attach your resume to the email before sending it.",
+    "exCn": "请在发送邮件前将您的简历附上。",
+    "deep": "attach 和 attach importance to 的区别在于：attach 可以指物理上的附上，也可以指抽象意义上的重视，而 attach importance to 仅指重视。"
+  },
+  "attain": {
+    "use": "vt. 达到；获得。正式程度较高，常见于正式文本。常见句型：attain a goal / standard。",
+    "phr": [
+      "attain a goal / standard 达到目标/标准",
+      "attainment 成就"
+    ],
+    "ex": "The company aims to attain a 20% market share within the next five years.",
+    "exCn": "该公司计划在未来五年内达到20%的市场份额。",
+    "deep": "attain 和 achieve 的区别在于：attain 通常指达到抽象的目标或标准，而 achieve 可以指达到具体的成果或目标。"
+  },
+  "attempt": {
+    "use": "vt./n. 尝试；企图。正式程度中等，常见于正式文本。常见句型：attempt to do；make an attempt at。",
+    "phr": [
+      "attempt to do 尝试做某事",
+      "make an attempt at 尝试做某事"
+    ],
+    "ex": "Scientists are attempting to develop a vaccine for the new virus.",
+    "exCn": "科学家们正在尝试开发一种新病毒的疫苗。",
+    "deep": "attempt 和 try 的区别在于：attempt 通常指有计划的尝试，而 try 可以指随意的尝试。"
+  },
+  "attitude": {
+    "use": "n. 心态；看法。正式程度中等，常见于正式文本。常见句型：attitude to / toward。注意：attitude 不接 of doing。",
+    "phr": [
+      "attitude to / toward 对…的态度",
+      "positive attitude 积极的态度"
+    ],
+    "ex": "Her positive attitude towards life inspires everyone around her.",
+    "exCn": "她对生活积极的态度激励着周围的每一个人。",
+    "deep": "attitude 和 opinion 的区别在于：attitude 通常指长期形成的看法或心态，而 opinion 可以指临时的看法或意见。"
+  },
+  "attribute": {
+    "use": "vt./n. 把…归因于；属性。正式程度中等，常见于正式文本。常见句型：attribute A to B；be attributed to。",
+    "phr": [
+      "attribute A to B 将A归因于B",
+      "be attributed to 被归因于"
+    ],
+    "ex": "The success of the project can be attributed to the team's hard work.",
+    "exCn": "该项目的成功可以归因于团队的努力。",
+    "deep": "attribute 和 ascribe 的区别在于：attribute 通常指归因于具体的原因或人，而 ascribe 可以指归因于抽象的原因或人。"
+  },
+  "authority": {
+    "use": "n. 权威；当局；权限。正式程度中等，常见于正式文本。",
+    "phr": [
+      "the authorities 当局",
+      "an authority on …方面的权威"
+    ],
+    "ex": "The local authorities have issued new regulations to control pollution.",
+    "exCn": "地方当局已发布新的法规以控制污染。",
+    "deep": "authority 和 power 的区别在于：authority 通常指合法的权力或权威，而 power 可以指任何形式的权力或能力。"
+  }
+}

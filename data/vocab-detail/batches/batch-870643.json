@@ -1,0 +1,72 @@
+{
+  "abstract": {
+    "use": "adj./n. 及物/不及物均可 较正式 常见于学术写作 'abstract'+名词或 'be abstracted from' 易错: abstract 不等于 vague",
+    "phr": [
+      "draw an abstract from 提取摘要",
+      "in the abstract 抽象地讲"
+    ],
+    "ex": "The paper is too abstract to be of much use to practitioners.",
+    "exCn": "这篇论文过于抽象，难以对从业者有所帮助。",
+    "deep": "abstract 指事物的抽象概括或摘要形式时多用于学术场合；in the abstract 强调理论化而非具体应用，与 concrete 相对。"
+  },
+  "access": {
+    "use": "n./v. 及物 较正式 'access to' 表示获得途径 'access' 作动词时直接跟宾语，不加 to",
+    "phr": [
+      "have access to 能获得",
+      "gain access to 获得访问权限"
+    ],
+    "ex": "Rural students still struggle to access high-quality courses online.",
+    "exCn": "农村学生仍然难以在线访问高质量课程。",
+    "deep": "access 作动词时为直接及物动词，不能加 to 介词；作名词时多与 to 连用，表示‘使用权’或‘进入通道’。"
+  },
+  "accompany": {
+    "use": "v. 及物 较正式 常见 'be accompanied by' 表达伴随关系 'accompany sb to' 表示陪同前往",
+    "phr": [
+      "be accompanied by 伴随",
+      "accompany sb to ... 陪某人去某处"
+    ],
+    "ex": "Rapid growth is often accompanied by rising inequality.",
+    "exCn": "快速增长往往伴随着日益增长的不平等。",
+    "deep": "accompany 常用于被动式 'be accompanied by'，强调自然发生的伴随；accompany sb to 则强调人为陪同，不能替换为 by。"
+  },
+  "accomplish": {
+    "use": "v. 及物 较正式 常见 'accomplish a task/goal' 'accomplishment' 为名词指成就",
+    "phr": [
+      "accomplish a task 完成任务",
+      "sense of accomplishment 成就感"
+    ],
+    "ex": "She accomplished more in one year than most do in five.",
+    "exCn": "她一年内完成的成就多于大多数人五年所做的。",
+    "deep": "accomplish 侧重于通过努力完成重要目标，与 complete 不同，后者更侧重过程的结束。"
+  },
+  "account": {
+    "use": "n./v. 及物/不及物 较正式 'account for' 解释或占比 'take ... into account' 考虑",
+    "phr": [
+      "account for 解释占比",
+      "take into account 考虑到"
+    ],
+    "ex": "The report accounts for the decline in three different ways.",
+    "exCn": "该报告用三种不同方式解释了这一下降。",
+    "deep": "account for 作动词时为及物动词，后接名词或代词解释原因；account as n. 时多指‘账户’或‘报告’。"
+  },
+  "accurate": {
+    "use": "adj. 不及物 较正式 'be accurate in' 'accuracy' 为名词",
+    "phr": [
+      "be accurate in 精确",
+      "within 5% accuracy 精确在5%范围内"
+    ],
+    "ex": "The forecast proved accurate to within two percentage points.",
+    "exCn": "这一预测证明精确到小数点后两位。",
+    "deep": "accurate 多用于描述数据、估计或陈述的正确性；形容人的言行多用 precise 或 exact，accurate 较少用于人。"
+  },
+  "adjust": {
+    "use": "v. 及物/不及物 较正式 'adjust to' 适应 'adjust for' 考虑因素",
+    "phr": [
+      "adjust to 适应",
+      "adjust for 考虑到"
+    ],
+    "ex": "Universities have adjusted their admissions criteria in response to criticism.",
+    "exCn": "大学们在回应批评时调整了招生标准。",
+    "deep": "adjust to 强调适应新环境或情况；adjust for 则表示在计算或判断时考虑某一因素，不能互换。"
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "apply": {
+    "use": "vt. 申请；适用；应用。常见句型：apply to 适用于；apply for 申请；apply A to B。",
+    "phr": [
+      "apply to 适用于",
+      "apply for 申请"
+    ],
+    "ex": "The same logic applies to the labor market.",
+    "exCn": "同样的逻辑也适用于劳动力市场。",
+    "deep": "apply 和 apply to 容易混淆，apply for 申请时，宾语必须是具体的事物，如 job, visa 等。"
+  },
+  "appreciate": {
+    "use": "vt. 意识到；感激；欣赏。常见句型：appreciate doing sth；appreciate 后不接 that 从句时多表“感激/欣赏”。",
+    "phr": [
+      "appreciate doing sth 感激做某事",
+      "appreciate the importance of 认识到…的重要性"
+    ],
+    "ex": "Few outsiders appreciate how fragile the system is.",
+    "exCn": "很少有外人意识到这个系统是多么脆弱。",
+    "deep": "appreciate 和 recognize 都有“意识到”的意思，但 appreciate 更强调“欣赏”或“感激”，而 recognize 更强调“认出”或“承认”。"
+  },
+  "approach": {
+    "use": "n./vt. 方法；接近；处理。常见句型：an approach to (doing) sth；approach 作动词直接跟宾语。",
+    "phr": [
+      "an approach to (doing) sth 处理…的方法",
+      "approach the problem 处理问题"
+    ],
+    "ex": "The authors approach the problem from a historical perspective.",
+    "exCn": "作者从历史角度来处理这个问题。",
+    "deep": "approach 和 method 都可以表示“方法”，但 approach 更强调“途径”或“方式”，而 method 更强调“具体步骤”或“程序”。"
+  },
+  "appropriate": {
+    "use": "a. 合适的；恰当的。常见句型：be appropriate for / to。",
+    "phr": [
+      "be appropriate for 适合于",
+      "be appropriate to 适合于"
+    ],
+    "ex": "It is appropriate to ask who bears the cost.",
+    "exCn": "问谁来承担成本是合适的。",
+    "deep": "appropriate 和 suitable 都可以表示“合适的”，但 appropriate 更强调“恰当性”或“适宜性”，而 suitable 更强调“适合性”或“相配性”。"
+  },
+  "approve": {
+    "use": "vt. 批准；赞成。常见句型：approve of 赞成；approve 批准；approval 批准。",
+    "phr": [
+      "approve of 赞成",
+      "give approval to 批准"
+    ],
+    "ex": "The committee approved the proposal after lengthy debate.",
+    "exCn": "委员会经过长时间的辩论后批准了提案。",
+    "deep": "approve 和 agree 都可以表示“赞成”，但 approve 更强调“正式批准”或“官方认可”，而 agree 更强调“个人意见”或“共识”。"
+  },
+  "arise": {
+    "use": "vi. 出现；产生。常见句型：arise from 由…引起；arise 不及物，无被动。",
+    "phr": [
+      "arise from 由…引起",
+      "arise in 出现在"
+    ],
+    "ex": "New problems arise when old rules are applied to new media.",
+    "exCn": "当旧规则应用于新媒体时，会出现新问题。",
+    "deep": "arise 和 emerge 都可以表示“出现”，但 arise 更强调“突然出现”或“产生”，而 emerge 更强调“逐渐显现”或“浮现”。"
+  },
+  "assign": {
+    "use": "vt. 分配；指派；归因。常见句型：assign sb sth；assign A to B；assignment 任务。",
+    "phr": [
+      "assign sb sth 分配给某人某物",
+      "assign A to B 将A分配给B"
+    ],
+    "ex": "Each participant was assigned a number to protect privacy.",
+    "exCn": "每个参与者被分配了一个号码以保护隐私。",
+    "deep": "assign 和 allocate 都可以表示“分配”，但 assign 更强调“指派”或“指定”，而 allocate 更强调“分配资源”或“分配任务”。"
+  },
+  "assume": {
+    "use": "vt. 假定；承担；呈现。常见句型：assume that；assuming that 假设；assumption 假设。",
+    "phr": [
+      "assume that 假定",
+      "take on the assumption of 假设"
+    ],
+    "ex": "The model assumes that consumers behave rationally.",
+    "exCn": "该模型假定消费者行为是理性的。",
+    "deep": "assume 和 suppose 都可以表示“假定”，但 assume 更强调“基于某种理由的假设”，而 suppose 更强调“猜测”或“推测”。"
+  }
+}

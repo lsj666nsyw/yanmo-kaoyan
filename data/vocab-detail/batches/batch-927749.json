@@ -1,0 +1,98 @@
+{
+  "available": {
+    "use": "available 作形容词，常作表语，表示“可获得的”或“有空的”；常用 be available to sb / for sth，作定语时常后置。",
+    "phr": [
+      "be available to sb 可供某人使用",
+      "be available for sth 可用于某事",
+      "readily available 现成可得的",
+      "available resources 可用资源"
+    ],
+    "ex": "Detailed data are readily available on the department's official website for researchers.",
+    "exCn": "详细数据可在该部门官方网站上供研究人员随时获取。",
+    "deep": "available 强调“可得到、可使用”，侧重客观条件；accessible 侧重“可接近、可进入”；obtainable 侧重“能弄到手”。考研中常考 be available to/for 结构，注意不可说 *available someone。"
+  },
+  "aware": {
+    "use": "aware 作形容词，只作表语，不可前置作定语；常用 be aware of / that，名词形式 awareness 表“意识”。",
+    "phr": [
+      "be aware of 意识到",
+      "be aware that 意识到……",
+      "fully aware 完全意识到",
+      "aware of the risks 意识到风险"
+    ],
+    "ex": "Many users are barely aware of how their data is collected by platforms.",
+    "exCn": "许多用户几乎不知道平台是如何收集其数据的。",
+    "deep": "aware 表示“知道、意识到”，后接 of/that，不能直接加宾语；conscious 侧重“神志清醒、有意识的”；know 是动词，用法不同。易错点：aware 不能作定语修饰名词。"
+  },
+  "bias": {
+    "use": "bias 作名词指“偏见、偏向”，常搭配 bias against / toward；作动词极少见，意为“使有偏见”。",
+    "phr": [
+      "bias against 对……有偏见",
+      "bias toward 向……倾斜",
+      "systematic bias 系统性偏差",
+      "biased sample 有偏见的样本"
+    ],
+    "ex": "The sample suffers from a systematic bias toward urban households in the survey.",
+    "exCn": "该样本在调查中存在系统性地偏向城市家庭的偏差。",
+    "deep": "bias 侧重统计或认知层面的“系统性偏离”；prejudice 含贬义，指“无根据的成见”；partiality 强调“偏袒”。动词 bias 极少用，考研多考名词搭配。"
+  },
+  "boost": {
+    "use": "boost 作动词“促进、提高”，及物；作名词“推动、增长”。常搭配 boost confidence / the economy，名词常用 a boost to sth。",
+    "phr": [
+      "boost confidence 增强信心",
+      "boost the economy 刺激经济",
+      "give a boost to 给……带来提振",
+      "boost sales 提升销量"
+    ],
+    "ex": "The tax cut is intended to significantly boost consumer spending across the nation.",
+    "exCn": "这项减税旨在大幅提振全国的消费支出。",
+    "deep": "boost 强调主动“推高、助推”，语气比 increase、raise 更强，常用于政策、信心等抽象对象。注意 boost 后接名词，不可说 *boost up。"
+  },
+  "capacity": {
+    "use": "capacity 作名词，指“能力、容量、产能”；常用 capacity for / to do，at full capacity 表示“满负荷”。",
+    "phr": [
+      "capacity for 具有……能力",
+      "capacity to do 能够做……",
+      "at full capacity 满负荷",
+      "production capacity 产能"
+    ],
+    "ex": "The system has the capacity to process millions of requests a day.",
+    "exCn": "该系统具备每天处理数百万请求的能力。",
+    "deep": "capacity 侧重可量化的“最大承载量”；ability 强调主观技能；capability 兼含潜力。考研常考 at full capacity 及 capacity to do 结构。"
+  },
+  "category": {
+    "use": "category 作名词“类别、范畴”；常用 fall into a category，动词 categorize 意为“分类”。",
+    "phr": [
+      "fall into a category 归入某类",
+      "broad category 大类",
+      "category of … …的范畴",
+      "categorize into 分类为"
+    ],
+    "ex": "Annual expenses fall into three broad categories according to the new accounting standards.",
+    "exCn": "根据新会计准则，年度支出归入三大类别。",
+    "deep": "category 为正式分类学术用语；class、type 更通用，class 常用于分层，type 强调同类特征。注意 fall into a category 固定搭配。"
+  },
+  "cease": {
+    "use": "cease 作动词“停止、终止”，正式书面语；可作及物或不及物，常用 cease to do / doing，名词 cease-fire 表“停火”。",
+    "phr": [
+      "cease to do 停止做……",
+      "cease doing 停止做……",
+      "cease fire 停火",
+      "cease operations 停止运营"
+    ],
+    "ex": "The factory ceased production in March due to prolonged supply chain disruptions.",
+    "exCn": "因长期供应链中断，工厂于三月停止了生产。",
+    "deep": "cease 比 stop、halt 更正式，多用于书面、法律、新闻语境；cease to do 表示“终止原本在做的事”，cease doing 表示“结束正在进行的动作”。"
+  },
+  "challenge": {
+    "use": "challenge 作动词“质疑、挑战”，及物；作名词“挑战、质疑”。常搭配 challenge a view / assumption，face a challenge。",
+    "phr": [
+      "challenge a view 质疑某种观点",
+      "face a challenge 面临挑战",
+      "challenge the assumption 质疑假设",
+      "challenging task 有挑战性的任务"
+    ],
+    "ex": "The findings challenge the long‑standing assumption that standardized tests are neutral in practice.",
+    "exCn": "研究结果质疑了标准化考试在实践中中立这一长期假设。",
+    "deep": "challenge 含“正面对抗、要求证明”的语气，比 question、contest 更强；question 侧重“提问、怀疑”，contest 侧重“竞争、争辩”。考研常考 challenge 作动词接名词/从句。"
+  }
+}

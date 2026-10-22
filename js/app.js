@@ -17,6 +17,13 @@
   const WORD_MAP = new Map();
   ALL_WORDS.forEach(function (w) { WORD_MAP.set(w.w, w); });
 
+  const VOCAB_DETAIL = window.VOCAB_DETAIL || {};
+  function wordDetail(w) { return w ? (VOCAB_DETAIL[w.w] || null) : null; }
+  function hasDetail(w) {
+    const d = wordDetail(w);
+    return !!(d && d.use && Array.isArray(d.phr) && d.phr.length && d.ex && d.exCn && d.deep);
+  }
+
   const TAG_OPTIONS = [
     { v: "全部", l: "全部" },
     { v: "精讲", l: "精讲" },
@@ -24,10 +31,10 @@
     { v: "核心", l: "核心" },
     { v: "僻义", l: "熟词僻义" },
     { v: "易混", l: "易混辨析" },
-    { v: "补充", l: "速记" },
+    { v: "补充", l: "补充" },
     { v: "生词本", l: "生词本" }
   ];
-  const TAG_LABEL = { "高频": "高频", "核心": "核心", "僻义": "僻义", "易混": "易混", "补充": "速记" };
+  const TAG_LABEL = { "高频": "高频", "核心": "核心", "僻义": "僻义", "易混": "易混", "补充": "补充" };
 
   const TASKS = [
     { t: "词汇", s: "先过一遍词表，再逐张标记", href: "#/vocab", cta: "去背词", key: "vocab" },
@@ -158,16 +165,129 @@
     });
   }
 
+  /* 朗读：系统英文语音优先；没有英文语音或系统语音报错时，使用内置离线语音。
+     内置语音是 meSpeak（eSpeak 的 JS 移植），不联网，也不依赖 speechSynthesis。 */
+  const TTS_MODES = ["auto", "native", "builtin"];
+  let nativeVoiceList = [];
+  let builtinTtsReady = false;
+  let builtinTtsFailed = false;
+
+  function refreshNativeVoices() {
+    if (!("speechSynthesis" in window)) { nativeVoiceList = []; return; }
+    try { nativeVoiceList = window.speechSynthesis.getVoices() || []; } catch (err) { nativeVoiceList = []; }
+  }
+
+  if ("speechSynthesis" in window) {
+    refreshNativeVoices();
+    if (typeof window.speechSynthesis.addEventListener === "function") {
+      window.speechSynthesis.addEventListener("voiceschanged", refreshNativeVoices);
+    } else {
+      window.speechSynthesis.onvoiceschanged = refreshNativeVoices;
+    }
+  }
+
+  function pickEnglishVoice() {
+    const list = (nativeVoiceList && nativeVoiceList.length)
+      ? nativeVoiceList
+      : (("speechSynthesis" in window) ? (window.speechSynthesis.getVoices() || []) : []);
+    const en = list.filter(function (v) { return /^en([-_]|$)/i.test(v.lang || ""); });
+    if (!en.length) return null;
+    const score = function (v) {
+      let s = 0;
+      if (/^en-US/i.test(v.lang || "")) s += 5;
+      if (/^en-GB/i.test(v.lang || "")) s += 3;
+      if (v.localService) s += 4;
+      if (/zira|aria|jenny|guy|david|mark|samantha|daniel|google us english/i.test(v.name || "")) s += 3;
+      if (/natural|neural/i.test(v.name || "")) s += 2;
+      return s;
+    };
+    en.sort(function (a, b) { return score(b) - score(a); });
+    return en[0];
+  }
+
+  function initBuiltinTts() {
+    if (builtinTtsReady) return true;
+    if (builtinTtsFailed) return false;
+    if (!window.meSpeak || !window.meSpeakCore || !window.MESPEAK_VOICE) {
+      builtinTtsFailed = true;
+      return false;
+    }
+    try {
+      const NativeXHR = window.XMLHttpRequest;
+      function VoiceXHR() { this.readyState = 0; this.status = 0; this.responseText = ""; }
+      VoiceXHR.prototype.open = function (method, url) { this.url = url; };
+      VoiceXHR.prototype.send = function () {
+        this.readyState = 4;
+        this.status = 200;
+        this.responseText = JSON.stringify(window.MESPEAK_VOICE);
+        if (this.onreadystatechange) this.onreadystatechange();
+      };
+      window.XMLHttpRequest = VoiceXHR;
+      let ok = false;
+      try {
+        meSpeak.loadVoice("voices/en/en-us.json", function (success) { if (success) ok = true; });
+      } finally {
+        window.XMLHttpRequest = NativeXHR;
+      }
+      builtinTtsReady = !!(ok || (meSpeak.isVoiceLoaded && meSpeak.isVoiceLoaded("en/en-us")));
+      if (!builtinTtsReady) builtinTtsFailed = true;
+      return builtinTtsReady;
+    } catch (err) {
+      builtinTtsFailed = true;
+      return false;
+    }
+  }
+
+  function speakBuiltin(text) {
+    if (!initBuiltinTts()) {
+      toast("内置语音加载失败，请换用系统语音或刷新页面");
+      return false;
+    }
+    try {
+      if (meSpeak.stop) meSpeak.stop();
+      meSpeak.speak(text, { speed: 145, amplitude: 100, wordgap: 0 }, function (ok) {
+        if (!ok) toast("发音失败，请再点一次");
+      });
+      return true;
+    } catch (err) {
+      toast("发音失败：" + (err.message || "未知错误"));
+      return false;
+    }
+  }
+
+  function speakNative(text) {
+    if (!("speechSynthesis" in window)) return false;
+    const voice = pickEnglishVoice();
+    if (!voice) return false;
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.voice = voice;
+      u.lang = voice.lang || "en-US";
+      u.rate = 0.92;
+      u.pitch = 1;
+      u.volume = 1;
+      u.onerror = function () { speakBuiltin(text); };
+      window.speechSynthesis.speak(u);
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
   function speak(text) {
-    if (!("speechSynthesis" in window)) {
-      toast("当前浏览器不支持朗读");
+    text = String(text || "").trim();
+    if (!text) return;
+    const mode = (state && TTS_MODES.indexOf(state.ttsMode) !== -1) ? state.ttsMode : "auto";
+    if (mode === "native") {
+      if (!speakNative(text)) speakBuiltin(text);
       return;
     }
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "en-US";
-    u.rate = 0.92;
-    window.speechSynthesis.speak(u);
+    if (mode === "builtin") {
+      speakBuiltin(text);
+      return;
+    }
+    if (!speakNative(text)) speakBuiltin(text);
   }
 
   /* ------------------------------------------------------------------
@@ -213,6 +333,7 @@
       version: 1,
       examDate: defaultExamDate(),
       dailyWords: 30,
+      ttsMode: "auto",
       words: {},
       notebook: [],
       mistakes: [],
@@ -294,6 +415,7 @@
     delete merged.seven;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(merged.examDate)) merged.examDate = base.examDate;
     merged.dailyWords = Math.min(100, Math.max(5, Number(merged.dailyWords) || 30));
+    merged.ttsMode = TTS_MODES.indexOf(merged.ttsMode) !== -1 ? merged.ttsMode : "auto";
     return merged;
   }
 
@@ -417,7 +539,7 @@
     if (ui.vocabTag === "生词本") {
       list = list.filter(function (w) { return state.notebook.indexOf(w.w) !== -1; });
     } else if (ui.vocabTag === "精讲") {
-      list = list.filter(function (w) { return !!w.ex; });
+      list = list.filter(function (w) { return hasDetail(w); });
     } else if (ui.vocabTag !== "全部") {
       list = list.filter(function (w) { return w.tag === ui.vocabTag; });
     }
@@ -685,7 +807,7 @@
       let count = "";
       if (t.v === "全部") count = ALL_WORDS.length;
       else if (t.v === "生词本") count = state.notebook.length;
-      else if (t.v === "精讲") count = ALL_WORDS.filter(function (w) { return !!w.ex; }).length;
+      else if (t.v === "精讲") count = ALL_WORDS.filter(function (w) { return hasDetail(w); }).length;
       else count = ALL_WORDS.filter(function (w) { return w.tag === t.v; }).length;
       return `<button class="chip ${ui.vocabTag === t.v ? "on" : ""}" data-action="set-tag" data-tag="${t.v}">${t.l}<span class="n">${count}</span></button>`;
     }).join("");
@@ -708,18 +830,18 @@
   function pageVocab() {
     const day = ensureDay(todayKey());
     const list = filteredWords();
-    const detailed = ALL_WORDS.filter(function (w) { return !!w.ex; }).length;
+    const detailed = ALL_WORDS.filter(function (w) { return hasDetail(w); }).length;
     return `
       ${pageHead("02", "词汇", "词汇", "大纲词很多，真正反复考的只是一部分。先把高频义项和搭配吃透，再谈遍数。")}
 
       <div class="stat-strip">
-        <div class="stat"><p class="k">词库</p><p class="v">${ALL_WORDS.length}<small>词</small></p><p class="s">${detailed} 精讲 · ${ALL_WORDS.length - detailed} 速记</p></div>
+        <div class="stat"><p class="k">词库</p><p class="v">${ALL_WORDS.length}<small>词</small></p><p class="s">${detailed === ALL_WORDS.length ? "全部带用法卡" : detailed + " 精讲 · " + (ALL_WORDS.length - detailed) + " 待补"}</p></div>
         <div class="stat"><p class="k">已掌握</p><p class="v">${knownCount()}<small>词</small></p><p class="s">标记为“认识”</p></div>
         <div class="stat"><p class="k">生词本</p><p class="v">${state.notebook.length}<small>词</small></p><p class="s">待复习</p></div>
         <div class="stat"><p class="k">今日已过</p><p class="v">${day.words}<small>/ ${state.dailyWords}</small></p><p class="s">目标 ${state.dailyWords} 词</p></div>
       </div>
 
-      <p class="vocab-note">精讲词带例句、搭配与辨析，适合精读；速记词只给核心义，适合快速排查。点“精讲”筛选可只看带例句的词条。</p>
+      <p class="vocab-note">每个词条按“用法—搭配—例句—辨析”整理。点开任意单词即可看完整卡片；卡片背面也会带一句用法和例句，不再只给中文释义。</p>
 
       <div class="toolbar">
         <div class="toolbar-left">
@@ -777,6 +899,11 @@
     const w = list[ui.cardIndex];
     const st = wordStatus(w.w);
     const longClass = w.w.length > 20 ? " long" : "";
+    const d = wordDetail(w);
+    const backUse = d && d.use ? d.use : "";
+    const backPhr = d && Array.isArray(d.phr) && d.phr.length ? d.phr.slice(0, 2).join(" · ") : (w.note || "");
+    const backEx = (d && d.ex) || w.ex || "";
+    const backExCn = (d && d.exCn) || w.exCn || "";
     const front = `
       <span class="flash-tag">${w.tag ? tagLabel(w.tag) : "词条"}</span>
       <span class="flash-word${longClass}">${esc(w.w)}</span>
@@ -786,7 +913,9 @@
       <span class="flash-tag">${w.tag ? tagLabel(w.tag) : "词条"}</span>
       <div class="flash-back">
         <p class="flash-def">${w.pos ? `<span class="flash-pos">${esc(w.pos)}</span>` : ""}${esc(w.cn)}</p>
-        ${w.ex ? `<p class="flash-ex">${esc(w.ex)}<small>${esc(w.exCn || "")}</small></p>` : `<p class="flash-ex">速记词条，建议结合真题语境记忆。<small>${esc(w.note || "")}</small></p>`}
+        ${backUse ? `<p class="flash-use">${esc(backUse)}</p>` : ""}
+        ${backPhr ? `<p class="flash-phr">${esc(backPhr)}</p>` : ""}
+        ${backEx ? `<p class="flash-ex">${esc(backEx)}<small>${esc(backExCn)}</small></p>` : ""}
       </div>
       <span class="flash-hint">1 不认识 · 2 模糊 · 3 认识</span>`;
     return `<div class="study-wrap">
@@ -889,10 +1018,19 @@
     const idx = ui.drawerList.findIndex(function (x) { return x.w === w.w; });
     const inBook = state.notebook.indexOf(w.w) !== -1;
     const longClass = w.w.length > 18 ? " long" : "";
+    const d = wordDetail(w);
+    const use = d && d.use ? d.use : "";
+    const phr = d && Array.isArray(d.phr) ? d.phr : [];
+    const ex = (d && d.ex) || w.ex || "";
+    const exCn = (d && d.exCn) || w.exCn || "";
+    const deep = d && d.deep ? d.deep : "";
+    const defs = d && Array.isArray(d.defs) ? d.defs : [];
+    const syn = d && Array.isArray(d.syn) ? d.syn : [];
+    const family = d && Array.isArray(d.family) ? d.family : [];
 
     drawer.innerHTML = `
       <div class="drawer-head">
-        <span class="eyebrow">词条 · ${w.tag ? tagLabel(w.tag) : "速记"}</span>
+        <span class="eyebrow">词条 · ${d ? "精讲" : (w.tag ? tagLabel(w.tag) : "速记")}</span>
         <button class="icon-btn" data-action="close-drawer" aria-label="关闭">✕</button>
       </div>
       <div class="drawer-body">
@@ -908,9 +1046,17 @@
           <button class="btn btn-sm btn-quiet" data-action="word-status" data-w="${esc(w.w)}" data-status="new">不认识</button>
         </div>
         <p class="drawer-def">${w.pos ? `<span class="pos">${esc(w.pos)}</span>` : ""}${esc(w.cn)}</p>
-        ${w.ex ? `<div class="drawer-ex"><p class="en">${esc(w.ex)}</p><p class="cn">${esc(w.exCn || "")}</p></div>` : `<div class="drawer-ex"><p class="cn">速记词条，暂无例句。建议回到真题语境中记它的搭配。</p></div>`}
+        ${use ? `<div class="drawer-block"><p class="block-k">用法</p><p class="block-text">${esc(use)}</p></div>` : ""}
+        ${defs.length ? `<div class="drawer-block"><p class="block-k">义项</p><ul class="drawer-senses">${defs.map(function (x) {
+          if (typeof x === "string") return `<li>${esc(x)}</li>`;
+          return `<li>${x.pos ? `<span class="sense-pos">${esc(x.pos)}</span>` : ""}${esc(x.cn || "")}${x.en ? `<span class="sense-en">${esc(x.en)}</span>` : ""}</li>`;
+        }).join("")}</ul></div>` : ""}
+        ${phr.length ? `<div class="drawer-block"><p class="block-k">搭配</p><ul class="drawer-phr">${phr.map(function (p) { return `<li>${esc(p)}</li>`; }).join("")}</ul></div>` : (w.note ? `<div class="drawer-block"><p class="block-k">搭配</p><p class="block-text">${esc(w.note)}</p></div>` : "")}
+        ${ex ? `<div class="drawer-ex"><p class="block-k">例句</p><p class="en">${esc(ex)}</p><p class="cn">${esc(exCn || "")}</p></div>` : ""}
+        ${syn.length ? `<div class="drawer-block"><p class="block-k">近义</p><p class="drawer-syn">${syn.map(function (s) { return `<span>${esc(s)}</span>`; }).join("")}</p></div>` : ""}
+        ${family.length ? `<div class="drawer-block"><p class="block-k">词族</p><p class="drawer-syn">${family.map(function (s) { return `<span>${esc(s)}</span>`; }).join("")}</p></div>` : ""}
+        ${deep ? `<div class="drawer-block drawer-deep"><p class="block-k">辨析</p><p class="block-text">${esc(deep)}</p></div>` : ""}
         <dl class="drawer-facts">
-          ${w.note ? `<div class="row"><dt>搭配</dt><dd>${esc(w.note)}</dd></div>` : ""}
           <div class="row"><dt>状态</dt><dd>${st.label || "尚未标记"}${inBook ? " · 已在生词本" : ""}</dd></div>
         </dl>
         <button class="btn btn-sm ${inBook ? "btn-quiet" : "btn-accent"}" data-action="word-toggle-notebook" data-w="${esc(w.w)}" style="margin-top:18px">${inBook ? "移出生词本" : "加入生词本"}</button>
@@ -2177,7 +2323,7 @@
       <div class="subnav">
         <button class="${ui.writingTab === "small" ? "on" : ""}" data-action="writing-tab" data-tab="small">小作文</button>
         <button class="${ui.writingTab === "big" ? "on" : ""}" data-action="writing-tab" data-tab="big">大作文</button>
-        <button class="${ui.writingTab === "patterns" ? "on" : ""}" data-action="writing-tab" data-tab="patterns">句型 · 替换 · 评分</button>
+        <button class="${ui.writingTab === "patterns" ? "on" : ""}" data-action="writing-tab" data-tab="patterns">句型 · 常用句 · 替换</button>
       </div>
       ${ui.writingTab === "small" ? smallWriting() : (ui.writingTab === "big" ? bigWriting() : writingPatterns())}`;
   }
@@ -2261,9 +2407,12 @@
   }
 
   function writingPatterns() {
-    const groups = window.WRITING.patterns.map(function (g) {
+    const index = window.WRITING.patterns.map(function (g, i) {
+      return `<button class="chip" data-action="jump-pattern" data-i="${i}">${esc(g.label)}</button>`;
+    }).join("");
+    const groups = window.WRITING.patterns.map(function (g, i) {
       return `
-        <div class="pattern-group">
+        <div class="pattern-group" id="pattern-g-${i}">
           <h3>${esc(g.label)}</h3>
           <ul class="pattern-list">${g.items.map(function (it) {
             return `<li><span class="en">${esc(it[0])}</span><span class="cn">${esc(it[1])}</span></li>`;
@@ -2281,6 +2430,7 @@
     return `
       <section class="section">
         <div class="section-head"><h2>功能句库</h2><span class="section-note">按段落功能记，不要按字母背</span></div>
+        <div class="pattern-index">${index}</div>
         <div class="pattern-groups">${groups}</div>
       </section>
 
@@ -2603,6 +2753,16 @@
           </div>
           <p class="mini-note">修改后倒计时与今日任务会立即更新。建议每天 20–50 词，按能复习完的量来定。</p>
           <div class="field">
+            <label>朗读方式</label>
+            <div class="chips">
+              <button class="chip ${state.ttsMode === "auto" ? "on" : ""}" data-action="set-tts" data-mode="auto">自动</button>
+              <button class="chip ${state.ttsMode === "native" ? "on" : ""}" data-action="set-tts" data-mode="native">系统语音</button>
+              <button class="chip ${state.ttsMode === "builtin" ? "on" : ""}" data-action="set-tts" data-mode="builtin">内置语音</button>
+            </div>
+            <p class="mini-note">自动：优先系统英文语音；浏览器没有英文语音时，自动改用内置离线语音。系统语音不可用时，也可以在词条里直接切到“内置语音”。</p>
+            <button class="text-link" data-action="test-tts">试听一句</button>
+          </div>
+          <div class="field">
             <label>干扰项归因</label>
             <p class="mini-note">${trapLine || "还没有训练记录。完成一组后，这里会保留累计正确率与最弱类型。"}</p>
             <a class="text-link" href="#/reading/traps">${trapLine ? "再练一组 →" : "去练一组 →"}</a>
@@ -2888,6 +3048,19 @@
       case "speak": {
         const text = data.text || data.w || "";
         if (text) speak(text);
+        break;
+      }
+      case "set-tts": {
+        if (TTS_MODES.indexOf(data.mode) !== -1) {
+          state.ttsMode = data.mode;
+          save();
+          rerender();
+          toast("朗读方式已切换");
+        }
+        break;
+      }
+      case "test-tts": {
+        speak("Reading is not a race. Slow down, and the argument will become clear.");
         break;
       }
       case "flip-card":
@@ -3329,6 +3502,11 @@
         ui.writingTab = data.tab;
         render();
         break;
+      case "jump-pattern": {
+        const el = document.getElementById("pattern-g-" + data.i);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        break;
+      }
       case "copy-sample": {
         const list = window.WRITING[data.kind];
         const item = list && list[Number(data.i)];

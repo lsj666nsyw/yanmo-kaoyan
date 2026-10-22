@@ -1,0 +1,82 @@
+{
+  "affect": {
+    "use": "vt. 影响；感染，正式程度较高，常见句型 be affected by。注意与 effect 区别。",
+    "phr": [
+      "be affected by 被...影响",
+      "affect the outcome 影响结果"
+    ],
+    "ex": "The new tax policy is expected to affect consumer spending significantly.",
+    "exCn": "新税收政策预计将显著影响消费支出。",
+    "deep": "affect 侧重于影响的过程或影响力，而 effect 通常指结果或影响的具体表现。"
+  },
+  "afford": {
+    "use": "vt. 负担得起；提供，常见句型 afford to do；afford sb sth。",
+    "phr": [
+      "afford to do 负担得起做某事",
+      "afford sb sth 给予某人某物"
+    ],
+    "ex": "The company can afford to hire more staff due to its recent profits.",
+    "exCn": "由于最近的利润，该公司可以负担得起雇佣更多员工。",
+    "deep": "afford 通常用于经济能力或资源的提供，不适用于抽象概念。"
+  },
+  "agenda": {
+    "use": "n. 议程；议事日程，正式程度较高，常见短语 on the agenda；hidden agenda。",
+    "phr": [
+      "on the agenda 提上日程",
+      "hidden agenda 隐秘目的"
+    ],
+    "ex": "The meeting's agenda included discussions on climate change and economic policies.",
+    "exCn": "会议的议程包括气候变化和经济政策的讨论。",
+    "deep": "agenda 通常指正式会议或活动的计划，而 schedule 更侧重于时间安排。"
+  },
+  "aggressive": {
+    "use": "a. 激进的；好斗的；积极进取的，常见搭配 aggressive marketing；aggression。",
+    "phr": [
+      "aggressive marketing 大力营销",
+      "aggressive behavior 好斗行为"
+    ],
+    "ex": "The company's aggressive marketing strategy helped it gain market share quickly.",
+    "exCn": "该公司的积极进取的营销策略帮助其迅速获得市场份额。",
+    "deep": "aggressive 可以指积极进取的行为，也可以指好斗或攻击性的行为，需要根据上下文判断。"
+  },
+  "alter": {
+    "use": "vt. 改变；修改，多指部分改变，常见名词 alteration。",
+    "phr": [
+      "alter the plan 修改计划",
+      "alter the design 改变设计"
+    ],
+    "ex": "The designer decided to alter the dress design to better fit the customer's preferences.",
+    "exCn": "设计师决定修改连衣裙的设计，以更好地符合顾客的偏好。",
+    "deep": "alter 通常指部分改变，而 change 可以指完全替换或部分改变。"
+  },
+  "alternative": {
+    "use": "n./a. 替代方案；可供替代的，常见句型 an alternative to；have no alternative but to do。",
+    "phr": [
+      "an alternative to 替代方案",
+      "have no alternative but to do 没有别的选择只能做"
+    ],
+    "ex": "In the absence of public transport, cycling became a popular alternative.",
+    "exCn": "在缺乏公共交通的情况下，骑自行车成为一种流行的替代方案。",
+    "deep": "alternative 作为形容词时，指可供选择的替代方案，而作为名词时，指具体的替代方案。"
+  },
+  "ambitious": {
+    "use": "a. 有雄心的；宏大的，常见搭配 be ambitious for sb；ambition。",
+    "phr": [
+      "be ambitious for sb 对某人有雄心",
+      "ambitious plan 宏大的计划"
+    ],
+    "ex": "The ambitious project aims to reduce carbon emissions by 50% within a decade.",
+    "exCn": "这个宏大的项目旨在十年内将碳排放量减少50%。",
+    "deep": "ambitious 通常指积极追求目标或抱负，而 ambitious 也可以指过于自信或自负。"
+  },
+  "analyze": {
+    "use": "vt. 分析，英式拼写 analyse；analysis 分析（复数 analyses）。",
+    "phr": [
+      "analyze the data 分析数据",
+      "in-depth analysis 深入分析"
+    ],
+    "ex": "Scientists analyzed the DNA samples to identify the genetic markers.",
+    "exCn": "科学家分析了DNA样本以识别基因标记。",
+    "deep": "analyze 侧重于分解或详细研究，而 examine 更侧重于检查或测试。"
+  }
+}

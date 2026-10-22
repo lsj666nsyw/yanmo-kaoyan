@@ -1,0 +1,82 @@
+{
+  "commit": {
+    "use": "vt. 承诺；犯（罪）；投入。正式场合常用，常见句型：commit oneself to doing sth.；commit a crime",
+    "phr": [
+      "commit oneself to doing sth. 承诺做某事",
+      "commit a crime 犯罪"
+    ],
+    "ex": "The government has committed itself to reducing emissions.",
+    "exCn": "政府承诺减少排放。",
+    "deep": "commit 与 promise 都有“承诺”之意，但 commit 更正式，常用于政府或组织的承诺；commit a crime 犯罪，而 commit suicide 自杀，注意区分。"
+  },
+  "commodity": {
+    "use": "n. 商品；有用的东西。常见搭配：commodity prices 商品价格",
+    "phr": [
+      "commodity prices 商品价格",
+      "commodify 商品化"
+    ],
+    "ex": "Attention has become a scarce commodity online.",
+    "exCn": "在线上，注意力已成为一种稀缺的商品。",
+    "deep": "commodity 通常指可交易的商品，如原材料、农产品等，而 product 更广泛，包括制成品。"
+  },
+  "community": {
+    "use": "n. 社区；群体；界。常见搭配：the scientific community 科学界",
+    "phr": [
+      "the scientific community 科学界",
+      "local community 当地社区"
+    ],
+    "ex": "The university works closely with the local community.",
+    "exCn": "大学与当地社区密切合作。",
+    "deep": "community 可指地理上的社区，也可指共同利益或特征的群体，如科学界、艺术界等。"
+  },
+  "compensate": {
+    "use": "vt. 补偿；弥补。常见句型：compensate for sth.",
+    "phr": [
+      "compensate for sth. 补偿某事",
+      "compensation 补偿"
+    ],
+    "ex": "No amount of money can compensate for the loss of trust.",
+    "exCn": "没有金钱能弥补信任的丧失。",
+    "deep": "compensate 通常指通过某种方式弥补损失或不足，而 reimburse 则指偿还费用或支付报销。"
+  },
+  "compete": {
+    "use": "vi. 竞争；比赛。常见句型：compete with/for",
+    "phr": [
+      "compete with sb. 与某人竞争",
+      "compete for sth. 争夺某物"
+    ],
+    "ex": "Small shops find it hard to compete with online giants.",
+    "exCn": "小店很难与在线巨头竞争。",
+    "deep": "compete 与 rival 都有“竞争”之意，但 compete 更常用于一般性的竞争，而 rival 更强调对手关系。"
+  },
+  "complex": {
+    "use": "a. 复杂的；n. 综合体。作形容词时常见搭配：complex and interrelated 复杂且相互关联的",
+    "phr": [
+      "complex and interrelated 复杂且相互关联的",
+      "complexity 复杂性"
+    ],
+    "ex": "The causes of inequality are complex and interrelated.",
+    "exCn": "不平等的原因复杂且相互关联。",
+    "deep": "complex 作形容词时指结构复杂或难以理解，而 complicated 则更强调难以处理或理解。"
+  },
+  "comply": {
+    "use": "vi. 遵守；服从。常见句型：comply with",
+    "phr": [
+      "comply with sth. 遵守某事",
+      "compliance 合规"
+    ],
+    "ex": "Firms that fail to comply with the rules face fines.",
+    "exCn": "不遵守规则的公司将面临罚款。",
+    "deep": "comply 与 obey 都有“服从”之意，但 comply 更正式，常用于法律或规则的遵守，而 obey 更常用于命令或指令的服从。"
+  },
+  "component": {
+    "use": "n. 组成部分；部件。常见搭配：a component of",
+    "phr": [
+      "a component of sth. 某物的组成部分",
+      "component part 组件"
+    ],
+    "ex": "Trust is a key component of any successful partnership.",
+    "exCn": "信任是任何成功合作的关键组成部分。",
+    "deep": "component 与 part 都有“部分”之意，但 component 更强调功能或结构上的组成部分，而 part 更广泛，包括物理部分和抽象部分。"
+  }
+}
