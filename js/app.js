@@ -17,8 +17,10 @@
   const WORD_MAP = new Map();
   ALL_WORDS.forEach(function (w) { WORD_MAP.set(w.w, w); });
 
-  const VOCAB_DETAIL = window.VOCAB_DETAIL || {};
-  function wordDetail(w) { return w ? (VOCAB_DETAIL[w.w] || null) : null; }
+  function wordDetail(w) {
+    const map = window.VOCAB_DETAIL || {};
+    return w ? (map[w.w] || null) : null;
+  }
   function hasDetail(w) {
     const d = wordDetail(w);
     return !!(d && d.use && Array.isArray(d.phr) && d.phr.length && d.ex && d.exCn && d.deep);
@@ -209,7 +211,6 @@
     if (builtinTtsReady) return true;
     if (builtinTtsFailed) return false;
     if (!window.meSpeak || !window.meSpeakCore || !window.MESPEAK_VOICE) {
-      builtinTtsFailed = true;
       return false;
     }
     try {
@@ -240,7 +241,7 @@
 
   function speakBuiltin(text) {
     if (!initBuiltinTts()) {
-      toast("内置语音加载失败，请换用系统语音或刷新页面");
+      toast(builtinTtsFailed ? "内置语音不可用，请换用系统语音" : "内置语音正在加载，请稍后再点一次");
       return false;
     }
     try {
@@ -428,6 +429,12 @@
   }
 
   const state = loadState();
+
+  window.addEventListener("vocabdetailready", function () {
+    if (ui.drawerWord) renderDrawer();
+    const route = getRoute();
+    if (route.name === "vocab" || route.name === "me") rerender();
+  });
 
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (err) { /* local file may block storage */ }
@@ -831,11 +838,12 @@
     const day = ensureDay(todayKey());
     const list = filteredWords();
     const detailed = ALL_WORDS.filter(function (w) { return hasDetail(w); }).length;
+    const detailReady = !!window.VOCAB_DETAIL;
     return `
       ${pageHead("02", "词汇", "词汇", "大纲词很多，真正反复考的只是一部分。先把高频义项和搭配吃透，再谈遍数。")}
 
       <div class="stat-strip">
-        <div class="stat"><p class="k">词库</p><p class="v">${ALL_WORDS.length}<small>词</small></p><p class="s">${detailed === ALL_WORDS.length ? "全部带用法卡" : detailed + " 精讲 · " + (ALL_WORDS.length - detailed) + " 待补"}</p></div>
+        <div class="stat"><p class="k">词库</p><p class="v">${ALL_WORDS.length}<small>词</small></p><p class="s">${!detailReady ? "词条详解加载中" : (detailed === ALL_WORDS.length ? "全部带用法卡" : detailed + " 精讲 · " + (ALL_WORDS.length - detailed) + " 待补")}</p></div>
         <div class="stat"><p class="k">已掌握</p><p class="v">${knownCount()}<small>词</small></p><p class="s">标记为“认识”</p></div>
         <div class="stat"><p class="k">生词本</p><p class="v">${state.notebook.length}<small>词</small></p><p class="s">待复习</p></div>
         <div class="stat"><p class="k">今日已过</p><p class="v">${day.words}<small>/ ${state.dailyWords}</small></p><p class="s">目标 ${state.dailyWords} 词</p></div>

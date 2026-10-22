@@ -492,7 +492,7 @@ async function main() {
   const sorted = {};
   for (const k of keys) sorted[k] = out[k];
   const header = `/* 自动生成，勿手改。数据源：KyleBing/english-vocabulary（BSD-3-Clause）与 NETEMVocabulary（CC BY-NC-SA 4.0）。仅用于个人学习，非商业分发。 */\n`;
-  fs.writeFileSync(path.join(ROOT, "data", "vocab-detail-data.js"), header + "window.VOCAB_DETAIL=Object.assign(window.VOCAB_DETAIL||{}," + JSON.stringify(sorted) + ");\n", "utf8");
+  fs.writeFileSync(path.join(ROOT, "data", "vocab-detail-data.js"), header + "window.VOCAB_DETAIL=Object.assign(window.VOCAB_DETAIL||{}," + JSON.stringify(sorted) + ");\n" + "if(typeof window.dispatchEvent===\"function\"&&typeof Event!==\"undefined\"){window.dispatchEvent(new Event(\"vocabdetailready\"));}\n", "utf8");
   fs.writeFileSync(path.join(ROOT, "data", "vocab-detail-stats.json"), JSON.stringify(stats, null, 2), "utf8");
   console.log(JSON.stringify({
     total: stats.total,
