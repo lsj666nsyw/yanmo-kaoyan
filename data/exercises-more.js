@@ -79,7 +79,7 @@
 
   window.SEVENS.push({
     title: "The Case for Walking Meetings",
-    intro: "七选五 · 5 题 6 选项 · 建议 15 分钟。选项中有两项为多余项。",
+    intro: "七选五 · 5 题 6 选项 · 建议 15 分钟。选项中有一项多余。",
     paragraphs: [
       "The meeting room is a familiar setting: a table, a screen, a row of chairs, and a conversation that somehow takes twice as long as planned. Part of the problem is the setting itself. It signals that the purpose is to sit still and wait one's turn. {{1}}",
       "Walking meetings are not a cure for bad management. They work for a particular kind of conversation: a one-to-one discussion, a problem that needs exploration, a decision that has been stuck. {{2}}",
@@ -115,7 +115,7 @@
 
   window.SEVENS.push({
     title: "How to Read a Contract",
-    intro: "七选五 · 5 题 6 选项 · 建议 15 分钟。选项中有两项为多余项。",
+    intro: "七选五 · 5 题 6 选项 · 建议 15 分钟。选项中有一项多余。",
     paragraphs: [
       "Most people sign contracts they have not read. The document is long, the print is small, and the terms seem designed to be skipped. {{1}}",
       "Start with the parties and the scope. Who is promising what, to whom, and by when? A contract that is vague about the deliverable is vague about everything that follows. {{2}}",

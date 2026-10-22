@@ -184,11 +184,27 @@
     return (window.SEVENS && window.SEVENS.length) ? window.SEVENS : [window.SEVEN];
   }
 
+  function orderSets() {
+    return (window.ORDER_SETS && window.ORDER_SETS.length) ? window.ORDER_SETS : [];
+  }
+
+  function headingSets() {
+    return (window.HEADING_SETS && window.HEADING_SETS.length) ? window.HEADING_SETS : [];
+  }
+
   function emptyCloze() {
     return { answers: {}, submitted: false, score: 0 };
   }
 
   function emptySeven() {
+    return { answers: [null, null, null, null, null], submitted: false, score: 0 };
+  }
+
+  function emptyOrder() {
+    return { answers: [null, null, null, null, null], submitted: false, score: 0 };
+  }
+
+  function emptyHeading() {
     return { answers: [null, null, null, null, null], submitted: false, score: 0 };
   }
 
@@ -204,6 +220,8 @@
       reading: {},
       clozes: clozeSets().map(function () { return emptyCloze(); }),
       sevens: sevenSets().map(function () { return emptySeven(); }),
+      orders: orderSets().map(function () { return emptyOrder(); }),
+      headings: headingSets().map(function () { return emptyHeading(); }),
       translations: {},
       drafts: {},
       trapStats: {}
@@ -245,6 +263,26 @@
         ? raw.sevens[i]
         : (i === 0 && plain(raw.seven) ? raw.seven : {});
       const st = Object.assign(emptySeven(), src);
+      if (!Array.isArray(st.answers)) st.answers = [null, null, null, null, null];
+      while (st.answers.length < 5) st.answers.push(null);
+      st.answers = st.answers.slice(0, 5);
+      st.submitted = !!st.submitted;
+      st.score = Number(st.score) || 0;
+      return st;
+    });
+    merged.orders = orderSets().map(function (_, i) {
+      const src = Array.isArray(raw.orders) && plain(raw.orders[i]) ? raw.orders[i] : {};
+      const st = Object.assign(emptyOrder(), src);
+      if (!Array.isArray(st.answers)) st.answers = [null, null, null, null, null];
+      while (st.answers.length < 5) st.answers.push(null);
+      st.answers = st.answers.slice(0, 5).map(function (x) { return x == null ? null : String(x); });
+      st.submitted = !!st.submitted;
+      st.score = Number(st.score) || 0;
+      return st;
+    });
+    merged.headings = headingSets().map(function (_, i) {
+      const src = Array.isArray(raw.headings) && plain(raw.headings[i]) ? raw.headings[i] : {};
+      const st = Object.assign(emptyHeading(), src);
       if (!Array.isArray(st.answers)) st.answers = [null, null, null, null, null];
       while (st.answers.length < 5) st.answers.push(null);
       st.answers = st.answers.slice(0, 5);
@@ -409,6 +447,8 @@
     clozeTab: "cloze",
     clozeSet: 0,
     sevenSet: 0,
+    orderSet: 0,
+    headingSet: 0,
     trapIndex: 0,
     trapPicked: null,
     trapChecked: false,
@@ -441,6 +481,24 @@
     ui.sevenSet = index;
     if (!state.sevens[index]) state.sevens[index] = emptySeven();
     return { set: sets[index], index: index, st: state.sevens[index] };
+  }
+
+  function activeOrder() {
+    const sets = orderSets();
+    if (!sets.length) return { set: null, index: 0, st: null };
+    const index = Math.min(Math.max(Number(ui.orderSet) || 0, 0), sets.length - 1);
+    ui.orderSet = index;
+    if (!state.orders[index]) state.orders[index] = emptyOrder();
+    return { set: sets[index], index: index, st: state.orders[index] };
+  }
+
+  function activeHeading() {
+    const sets = headingSets();
+    if (!sets.length) return { set: null, index: 0, st: null };
+    const index = Math.min(Math.max(Number(ui.headingSet) || 0, 0), sets.length - 1);
+    ui.headingSet = index;
+    if (!state.headings[index]) state.headings[index] = emptyHeading();
+    return { set: sets[index], index: index, st: state.headings[index] };
   }
 
   const timer = {
@@ -1711,18 +1769,25 @@
   }
 
   function pageCloze() {
-    const isCloze = ui.clozeTab === "cloze";
-    const active = isCloze ? activeCloze() : activeSeven();
+    const tab = ["cloze", "seven", "order", "heading"].indexOf(ui.clozeTab) !== -1 ? ui.clozeTab : "cloze";
+    const meta = {
+      cloze: ["完形填空", "完形考的不是单词量，而是上下文关系。先通读定调，再逐空找搭配与逻辑。"],
+      seven: ["新题型 · 七选五", "七选五考篇章衔接。先看选项里的代词和连接词，再回到空白前后找线索。"],
+      order: ["新题型 · 排序题", "排序题考篇章骨架。先读首尾定方向，再抓序数、代词与递进词。"],
+      heading: ["新题型 · 小标题", "小标题考段落主旨。标题是概括，不是细节复述。"]
+    }[tab];
+    const sets = tab === "cloze" ? clozeSets() : tab === "seven" ? sevenSets() : tab === "order" ? orderSets() : headingSets();
+    const active = tab === "cloze" ? activeCloze() : tab === "seven" ? activeSeven() : tab === "order" ? activeOrder() : activeHeading();
+    const body = tab === "cloze" ? clozeBody(active) : tab === "seven" ? sevenBody(active) : tab === "order" ? orderBody(active) : headingBody(active);
     return `
-      ${pageHead("05", "完形 · 新题型", isCloze ? "完形填空" : "新题型 · 七选五", isCloze
-        ? "完形考的不是单词量，而是上下文关系。先通读定调，再逐空找搭配与逻辑。"
-        : "七选五考篇章衔接。先看选项里的代词和连接词，再回到空白前后找线索。")}
+      ${pageHead("05", "完形 · 新题型", meta[0], meta[1])}
       <div class="subnav">
-        <button class="${isCloze ? "on" : ""}" data-action="cloze-tab" data-tab="cloze">完形填空</button>
-        <button class="${!isCloze ? "on" : ""}" data-action="cloze-tab" data-tab="seven">七选五</button>
+        <button class="${tab === "cloze" ? "on" : ""}" data-action="cloze-tab" data-tab="cloze">完形填空</button>
+        <button class="${tab === "seven" ? "on" : ""}" data-action="cloze-tab" data-tab="seven">七选五</button>
+        <button class="${tab === "order" ? "on" : ""}" data-action="cloze-tab" data-tab="order">排序题</button>
+        <button class="${tab === "heading" ? "on" : ""}" data-action="cloze-tab" data-tab="heading">小标题</button>
       </div>
-      ${exerciseSetPicker(isCloze ? "cloze" : "seven", isCloze ? clozeSets() : sevenSets(), active.index)}
-      ${isCloze ? clozeBody(active) : sevenBody(active)}`;
+      ${sets.length ? exerciseSetPicker(tab, sets, active.index) + body : `<div class="empty"><p class="mark">空</p><p>这一类题目还在整理中。</p></div>`}`;
   }
 
   function clozeBlank(n, active) {
@@ -1863,6 +1928,115 @@
           <button class="btn btn-solid" data-action="submit-seven">提交答案</button>
         </div>`}
       ${tipsAccordion("五条做七选五的方法", set.tips)}`;
+  }
+
+  function orderBody(active) {
+    const set = active.set;
+    const st = active.st;
+    const answers = st.answers;
+    const chosen = answers.filter(function (x) { return x != null; }).length;
+    const letters = ["B", "C", "D", "E", "F"];
+    const paragraphs = set.paragraphs.map(function (p) {
+      const fixed = p.label === set.first ? "已定首段" : p.label === set.last ? "已定末段" : "";
+      return `<p><b class="order-tag">${p.label}</b>${esc(p.text)}${fixed ? ` <span class="tag">${fixed}</span>` : ""}</p>`;
+    }).join("");
+    const slots = answers.map(function (picked, i) {
+      const correct = set.answers[i];
+      const buttons = letters.map(function (lab) {
+        let cls = "";
+        if (st.submitted) {
+          if (lab === correct) cls = "correct";
+          else if (lab === picked) cls = "wrong";
+        } else if (lab === picked) {
+          cls = "sel";
+        } else if (answers.indexOf(lab) !== -1) {
+          cls = "used";
+        }
+        return `<button class="${cls}" data-action="pick-order" data-i="${i}" data-oi="${lab}" ${st.submitted ? "disabled" : ""} aria-label="第 ${i + 2} 段选 ${lab}">${lab}</button>`;
+      }).join("");
+      return `<div class="seven-slot"><label>第 ${i + 2} 段</label><div class="slot-options">${buttons}</div></div>`;
+    }).join("");
+    const explanations = set.explain.map(function (text, i) {
+      return `<div class="explain-item"><i>${i + 2}</i><div><b>${set.answers[i]}</b>　${esc(text)}</div></div>`;
+    }).join("");
+
+    return `
+      <p class="cloze-intro">${esc(set.intro)}</p>
+      <div class="cloze-toolbar">
+        <span class="count-line">已排 ${chosen} / 5</span>
+        <span class="score-note">A 为首段、G 为末段，其余五段各用一次</span>
+      </div>
+      <div class="cloze-passage order-passage">${paragraphs}</div>
+      <div class="seven-selects">${slots}</div>
+      ${st.submitted ? `
+        <div class="score-banner">
+          <div><p class="label">排序题得分</p><p class="score">${st.score}<small> / 5</small></p></div>
+          <p class="copy">正确顺序：A → ${set.answers.join(" → ")} → G · 错题已收入错题本</p>
+          <div class="actions"><button class="btn btn-sm btn-quiet" data-action="reset-order">重做本篇</button><a class="btn btn-sm btn-quiet" href="#/me/mistakes">看错题</a></div>
+        </div>
+        <div class="explain-list">${explanations}</div>` : `
+        <div class="q-actions">
+          <span class="score-note">${chosen < 5 ? "还有 " + (5 - chosen) + " 段未排。" : "已全部排好，可以提交。"}</span>
+          <button class="btn btn-solid" data-action="submit-order">提交答案</button>
+        </div>`}
+      ${tipsAccordion("五条做排序题的方法", set.tips)}`;
+  }
+
+  function headingBody(active) {
+    const set = active.set;
+    const st = active.st;
+    const answers = st.answers;
+    const chosen = answers.filter(function (x) { return x != null; }).length;
+    const options = set.options.map(function (opt, i) {
+      return `<div class="seven-option ${st.submitted && i === set.extra ? "extra" : ""}"><i>${letter(i)}</i><span class="en">${esc(opt)}</span>${st.submitted && i === set.extra ? `<span class="tag">多余</span>` : ""}</div>`;
+    }).join("");
+    const sections = set.sections.map(function (text, i) {
+      const picked = answers[i];
+      const correct = set.answers[i];
+      const buttons = set.options.map(function (_, oi) {
+        let cls = "";
+        if (st.submitted) {
+          if (oi === correct) cls = "correct";
+          else if (oi === picked) cls = "wrong";
+        } else if (oi === picked) {
+          cls = "sel";
+        } else if (answers.indexOf(oi) !== -1) {
+          cls = "used";
+        }
+        return `<button class="${cls}" data-action="pick-heading" data-i="${i}" data-oi="${oi}" ${st.submitted ? "disabled" : ""} aria-label="第 ${i + 1} 段选 ${letter(oi)}">${letter(oi)}</button>`;
+      }).join("");
+      return `<div class="heading-item">
+        <div class="seven-slot"><label>第 ${i + 1} 段标题</label><div class="slot-options">${buttons}</div></div>
+        <p class="heading-text">${esc(text)}</p>
+      </div>`;
+    }).join("");
+    const explanations = set.explain.map(function (text, i) {
+      return `<div class="explain-item"><i>${i + 1}</i><div><b>${letter(set.answers[i])}</b>　${esc(text)}</div></div>`;
+    }).join("");
+
+    return `
+      <p class="cloze-intro">${esc(set.intro)}</p>
+      <div class="cloze-toolbar">
+        <span class="count-line">已选 ${chosen} / 5</span>
+        <span class="score-note">同一标题只能使用一次</span>
+      </div>
+      <div class="seven-options">
+        <p class="label" style="margin-bottom:8px">标题 A—F</p>
+        ${options}
+      </div>
+      <div class="heading-list">${sections}</div>
+      ${st.submitted ? `
+        <div class="score-banner">
+          <div><p class="label">小标题得分</p><p class="score">${st.score}<small> / 5</small></p></div>
+          <p class="copy">多余项为 ${letter(set.extra)} · 错题已收入错题本</p>
+          <div class="actions"><button class="btn btn-sm btn-quiet" data-action="reset-heading">重做本篇</button><a class="btn btn-sm btn-quiet" href="#/me/mistakes">看错题</a></div>
+        </div>
+        <div class="explain-list">${explanations}</div>` : `
+        <div class="q-actions">
+          <span class="score-note">${chosen < 5 ? "还有 " + (5 - chosen) + " 段未选。" : "已全部作答，可以提交。"}</span>
+          <button class="btn btn-solid" data-action="submit-heading">提交答案</button>
+        </div>`}
+      ${tipsAccordion("五条做小标题的方法", set.tips)}`;
   }
 
   function tipsAccordion(title, tips) {
@@ -2237,7 +2411,7 @@
         <div class="stat"><p class="k">连续学习</p><p class="v">${streakDays()}<small>天</small></p><p class="s">今天也算在内</p></div>
         <div class="stat"><p class="k">累计专注</p><p class="v">${totalMinutes()}<small>分钟</small></p><p class="s">完整专注时段</p></div>
         <div class="stat"><p class="k">已掌握</p><p class="v">${knownCount()}<small>词</small></p><p class="s">标记为“认识”</p></div>
-        <div class="stat"><p class="k">错题</p><p class="v">${state.mistakes.length}<small>道</small></p><p class="s">阅读 · 完形 · 七选五</p></div>
+        <div class="stat"><p class="k">错题</p><p class="v">${state.mistakes.length}<small>道</small></p><p class="s">阅读 · 完形 · 新题型</p></div>
       </div>
 
       <div class="subnav">
@@ -2323,7 +2497,7 @@
   }
 
   function meMistakes() {
-    const types = ["全部", "阅读", "完形", "七选五"];
+    const types = ["全部", "阅读", "完形", "七选五", "排序", "小标题"];
     const chips = types.map(function (t) {
       const n = t === "全部" ? state.mistakes.length : state.mistakes.filter(function (m) { return m.type === t; }).length;
       return `<button class="chip ${ui.mistakeFilter === t ? "on" : ""}" data-action="mistake-filter" data-filter="${t}">${t}<span class="n">${n}</span></button>`;
@@ -2384,7 +2558,7 @@
         <span class="count-line">${list.length} 道</span>
       </div>
       ${list.length ? `<div class="mistake-list">${cards}</div>` : `
-        <div class="empty"><p class="mark">净</p><p>这个分类还没有错题。做完阅读、完形或七选五，答错的题会自动收录。</p><div class="actions"><a class="btn btn-quiet" href="#/reading">去做阅读</a></div></div>`}`;
+        <div class="empty"><p class="mark">净</p><p>这个分类还没有错题。做完阅读、完形、七选五、排序或小标题，答错的题会自动收录。</p><div class="actions"><a class="btn btn-quiet" href="#/reading">去做阅读</a></div></div>`}`;
   }
 
   function meRecords() {
@@ -2519,6 +2693,15 @@
       const answer = set && set.answers[i];
       if (answer == null) return null;
       return { options: set.options, answer: answer, explain: set.explain[i], loc: "第 " + (i + 1) + " 空" };
+    }
+    if (parts[0] === "heading") {
+      const hasSet = parts.length >= 3;
+      const setIndex = hasSet ? Number(parts[1]) : 0;
+      const i = Number(hasSet ? parts[2] : parts[1]);
+      const set = headingSets()[setIndex];
+      const answer = set && set.answers[i];
+      if (answer == null) return null;
+      return { options: set.options, answer: answer, explain: set.explain[i], loc: "第 " + (i + 1) + " 段" };
     }
     return null;
   }
@@ -2901,6 +3084,14 @@
         ui.sevenSet = Math.max(0, Number(data.i) || 0);
         render();
         break;
+      case "order-set":
+        ui.orderSet = Math.max(0, Number(data.i) || 0);
+        render();
+        break;
+      case "heading-set":
+        ui.headingSet = Math.max(0, Number(data.i) || 0);
+        render();
+        break;
       case "pick-cloze": {
         const active = activeCloze();
         if (active.st.submitted) break;
@@ -2999,6 +3190,119 @@
         save();
         render();
         toast("已重置本篇七选五");
+        break;
+      }
+      case "pick-order": {
+        const active = activeOrder();
+        if (!active.st || active.st.submitted) break;
+        const i = Number(data.i);
+        const lab = String(data.oi);
+        const answers = active.st.answers.slice(0, 5);
+        while (answers.length < 5) answers.push(null);
+        const used = answers.indexOf(lab);
+        if (used !== -1 && used !== i) answers[used] = null;
+        answers[i] = lab;
+        active.st.answers = answers;
+        save();
+        rerender();
+        break;
+      }
+      case "submit-order": {
+        const active = activeOrder();
+        const set = active.set;
+        const st = active.st;
+        if (!set || !st) break;
+        const chosen = st.answers.filter(function (x) { return x != null; }).length;
+        if (chosen < 5) { toast("还有 " + (5 - chosen) + " 段未排"); break; }
+        let score = 0;
+        set.answers.forEach(function (correct, i) {
+          const picked = st.answers[i];
+          if (picked === correct) score++;
+          else {
+            const prev = i === 0 ? set.first : set.answers[i - 1];
+            upsertMistake({
+              key: "order-" + active.index + "-" + i,
+              type: "排序",
+              source: "排序题 · " + set.title,
+              stem: "接在 " + prev + " 之后（第 " + (i + 2) + " 段）应选哪一段？",
+              your: picked || "—",
+              answer: correct,
+              explain: set.explain[i],
+              loc: "第 " + (i + 2) + " 段"
+            });
+          }
+        });
+        st.score = score;
+        st.submitted = true;
+        touch();
+        save();
+        toast("已提交 · 答对 " + score + " 段");
+        rerender();
+        break;
+      }
+      case "reset-order": {
+        const active = activeOrder();
+        if (!active.st) break;
+        state.orders[active.index] = emptyOrder();
+        clearExerciseMistakes("order", active.index);
+        save();
+        render();
+        toast("已重置本篇排序题");
+        break;
+      }
+      case "pick-heading": {
+        const active = activeHeading();
+        if (!active.st || active.st.submitted) break;
+        const i = Number(data.i);
+        const oi = Number(data.oi);
+        const answers = active.st.answers.slice(0, 5);
+        while (answers.length < 5) answers.push(null);
+        const used = answers.indexOf(oi);
+        if (used !== -1 && used !== i) answers[used] = null;
+        answers[i] = oi;
+        active.st.answers = answers;
+        save();
+        rerender();
+        break;
+      }
+      case "submit-heading": {
+        const active = activeHeading();
+        const set = active.set;
+        const st = active.st;
+        if (!set || !st) break;
+        const chosen = st.answers.filter(function (x) { return x != null; }).length;
+        if (chosen < 5) { toast("还有 " + (5 - chosen) + " 段未选"); break; }
+        let score = 0;
+        set.answers.forEach(function (correct, i) {
+          const picked = st.answers[i];
+          if (picked === correct) score++;
+          else upsertMistake({
+            key: "heading-" + active.index + "-" + i,
+            type: "小标题",
+            source: "小标题 · " + set.title,
+            stem: set.sections[i].slice(0, 110) + (set.sections[i].length > 110 ? "…" : ""),
+            your: picked != null ? letter(picked) : "—",
+            answer: letter(correct),
+            explain: set.explain[i],
+            loc: "第 " + (i + 1) + " 段"
+          });
+        });
+        st.score = score;
+        st.submitted = true;
+        touch();
+        save();
+        toast("已提交 · 答对 " + score + " 段");
+        rerender();
+        break;
+      }
+      case "reset-heading": {
+        const active = activeHeading();
+        if (!active.st) break;
+        state.headings[active.index] = emptyHeading();
+        clearExerciseMistakes("heading", active.index);
+        save();
+        render();
+        toast("已重置本篇小标题");
         break;
       }
       case "trans-tab":

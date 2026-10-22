@@ -1305,6 +1305,21 @@ mark { background: #eee0d3; color: inherit; padding: 0 2px; }
 .slot-options button.used { opacity: .28; border-style: dashed; }
 .slot-options button:disabled { cursor: default; }
 
+/* ---------- ordering / heading matching ---------- */
+.order-passage p { padding-left: 0; }
+.order-tag {
+  display: inline-block; min-width: 18px; margin-right: 8px;
+  font-family: var(--mono); font-style: normal; font-size: 10.5px; color: var(--accent);
+}
+.order-passage .tag { margin-left: 6px; }
+.heading-list { margin-top: 22px; border-top: 1px solid var(--line); }
+.heading-item { padding: 18px 0; border-bottom: 1px solid var(--line-2); }
+.heading-item .seven-slot { margin-bottom: 8px; }
+.heading-text {
+  margin: 6px 0 0; font-family: var(--serif);
+  font-size: 14px; line-height: 1.95; color: var(--ink-2);
+}
+
 .tips-acc { margin-top: 34px; }
 .tips-list li {
   display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 18px;
