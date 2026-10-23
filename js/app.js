@@ -203,6 +203,7 @@
       const name = (v.name || "").toLowerCase();
       let s = 0;
       if (/natural|neural|online/i.test(name)) s += 8;      // Windows 11 / Edge 的神经网络音最自然
+      if (/multilingual/i.test(name)) s -= 2;                // 多语言版读英文带口音，优先纯英文版
       if (/^en-us/i.test(v.lang || "")) s += 3;
       if (/^en-gb/i.test(v.lang || "")) s += 2;
       if (/aria|jenny|ana|emma|michelle|guy|zira|samantha|daniel|serena|google/i.test(name)) s += 3;
@@ -213,17 +214,38 @@
     return en;
   }
 
-  // 设置里手动选过的声音优先；否则取质量最高的一条
+  // 本次访问内被判定「没读出来/假死」的系统语音，之后不再重试
+  const deadVoices = new Set();
+
+  // 设置里手动选过的声音优先；否则取质量最高的一条。已列入黑名单的自动跳过
   function resolveVoice() {
-    const list = englishVoices();
-    if (!list.length) return null;
+    const alive = englishVoices().filter(function (v) { return !deadVoices.has(v.name); });
+    if (!alive.length) return null;
     const pref = (state && state.ttsVoice) || "";
     if (pref) {
-      for (let i = 0; i < list.length; i++) {
-        if (list[i].name === pref || list[i].voiceURI === pref) return list[i];
+      for (let i = 0; i < alive.length; i++) {
+        if (alive[i].name === pref || alive[i].voiceURI === pref) return alive[i];
       }
     }
-    return list[0];
+    return alive[0];
+  }
+
+  // 朗读候选链：首选（手动指定或自动最优）→ 其他本地系统语音；在线音失败后不再连试在线音
+  function voiceCandidates() {
+    const alive = englishVoices().filter(function (v) { return !deadVoices.has(v.name); });
+    const out = [];
+    const pref = (state && state.ttsVoice) || "";
+    if (pref) {
+      for (let i = 0; i < alive.length; i++) {
+        if (alive[i].name === pref || alive[i].voiceURI === pref) { out.push(alive[i]); break; }
+      }
+    } else if (alive.length) {
+      out.push(alive[0]);
+    }
+    for (let i = 0; i < alive.length; i++) {
+      if (out.indexOf(alive[i]) === -1 && alive[i].localService) out.push(alive[i]);
+    }
+    return out.slice(0, 3);
   }
 
   // 语速：慢/正常/快；长句（阅读原句）略快于单词
@@ -250,7 +272,7 @@
     }
     const cur = resolveVoice();
     const hint = cur
-      ? "当前将使用：" + esc(cur.name) + (state && state.ttsVoice ? "（手动指定）" : "（自动选择）")
+      ? "当前将使用：" + esc(cur.name) + (state && state.ttsVoice ? "（手动指定）" : "（自动选择）") + "。若没读出来会自动换下一个语音。"
       : "未检测到系统英文语音，当前会用离线内置语音朗读。";
     return `<div class="field" style="margin-top:10px"><label for="ttsVoiceSelect">朗读声音</label><select id="ttsVoiceSelect">${opts.join("")}</select><p class="mini-note">${hint}</p></div>`;
   }
@@ -340,26 +362,50 @@
 
   function speakNative(text) {
     if (!("speechSynthesis" in window)) return false;
-    const voice = resolveVoice();
-    if (!voice) return false;
+    const candidates = voiceCandidates();
+    if (!candidates.length) return false;
     const synth = window.speechSynthesis;
     let busy = false;
     try { busy = !!(synth.speaking || synth.pending); } catch (err) {}
     if (busy) { try { synth.cancel(); } catch (err) {} }
     if (speakDelay) { clearTimeout(speakDelay); speakDelay = null; }
     if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
-    function start() {
-      let began = false;
-      let fellBack = false;
-      /* 系统语音失败（报错或假死）时转离线兜底；同样原因只提示一次 */
-      const useBuiltin = function (note) {
-        if (fellBack) return;
-        fellBack = true;
-        try { synth.cancel(); } catch (err) {}
-        if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
+    let idx = 0;
+
+    function markDead(voice) {
+      try { deadVoices.add(voice.name || voice.voiceURI || "?"); } catch (err) {}
+    }
+
+    function advance() {
+      if (idx >= candidates.length) {
         ttsMarkSpeaking(false);
-        if (note && !nativeFailNoted) { nativeFailNoted = true; toast(note); }
+        if (!nativeFailNoted) {
+          nativeFailNoted = true;
+          toast("系统语音都没读出来，先用离线语音朗读（可在设置里换声音）");
+        }
         speakBuiltin(text);
+        return;
+      }
+      attempt(candidates[idx], idx === 0);
+      idx++;
+    }
+
+    function attempt(voice, first) {
+      let began = false;
+      let settled = false;
+      const failStep = function (note) {
+        if (settled) return;
+        settled = true;
+        if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
+        markDead(voice);
+        try { synth.cancel(); } catch (err) {}
+        if (speakDelay) clearTimeout(speakDelay);
+        // Windows 取消后立刻再开会静音，缓冲一拍再让下一个声音上场
+        speakDelay = setTimeout(advance, 80);
+        if (note && !nativeFailNoted) {
+          nativeFailNoted = true;
+          toast(note);
+        }
       };
       try {
         const chunks = speechChunks(text);
@@ -375,29 +421,27 @@
               began = true;
               if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
             };
-            u.onerror = function () { useBuiltin("系统语音没读出来，已自动改用离线语音"); };
+            u.onerror = function () { failStep("当前朗读声音没读出来，已换其他系统语音"); };
           } else if (i === chunks.length - 1) {
             u.onend = function () { ttsMarkSpeaking(false); };
-            u.onerror = function () { ttsMarkSpeaking(false); };
+            u.onerror = function () { failStep("当前朗读声音没读出来，已换其他系统语音"); };
           }
           synth.speak(u);
         }
-        /* 看门狗：Windows 的 Online (Natural) 神经网络音可能接受播放却永远不出声，
-           3.5 秒内没有 onstart 就判定假死，自动转离线语音 */
+        /* 看门狗：Online (Natural) 神经网络音可能接受播放却永远不出声。
+           首个候选 3 秒、后续候选 2 秒还没 onstart 就判为假死，换下一个声音 */
         if (ttsWatch) clearTimeout(ttsWatch);
-        ttsWatch = setTimeout(function () {
-          if (!began) useBuiltin("系统语音启动超时，已自动改用离线语音（可在设置里换个声音试试）");
-          ttsWatch = null;
-        }, 3500);
+        ttsWatch = setTimeout(function () { failStep("当前朗读声音启动超时，已换其他系统语音"); }, first ? 3000 : 2200);
         ttsMarkSpeaking(true);
       } catch (err) {
-        useBuiltin("");
+        failStep("");
       }
     }
+
     // Windows 在「取消后立即开始」时大概率静音/迟滞，中断重播延迟一拍；
     // 空闲时同步播（iOS Safari 要求 speak 与用户手势同帧）。
-    if (busy) speakDelay = setTimeout(start, 80);
-    else start();
+    if (busy) speakDelay = setTimeout(advance, 80);
+    else advance();
     return true;
   }
 
