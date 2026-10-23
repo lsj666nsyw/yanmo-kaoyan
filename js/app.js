@@ -193,17 +193,16 @@
     }
   }
 
-  function pickEnglishVoice() {
+  function englishVoices() {
     let list = (nativeVoiceList && nativeVoiceList.length)
       ? nativeVoiceList
       : (("speechSynthesis" in window) ? (window.speechSynthesis.getVoices() || []) : []);
-    if (!list.length) return null;
+    if (!list.length) return [];
     const en = list.filter(function (v) { return /^en([-_]|$)/i.test(v.lang || ""); });
-    if (!en.length) return null;
     const score = function (v) {
       const name = (v.name || "").toLowerCase();
       let s = 0;
-      if (/natural|neural|online/i.test(name)) s += 8;      // Windows 11「Aria Online (Natural)」等
+      if (/natural|neural|online/i.test(name)) s += 8;      // Windows 11 / Edge 的神经网络音最自然
       if (/^en-us/i.test(v.lang || "")) s += 3;
       if (/^en-gb/i.test(v.lang || "")) s += 2;
       if (/aria|jenny|ana|emma|michelle|guy|zira|samantha|daniel|serena|google/i.test(name)) s += 3;
@@ -211,7 +210,45 @@
       return s;
     };
     en.sort(function (a, b) { return score(b) - score(a); });
-    return en[0];
+    return en;
+  }
+
+  // 设置里手动选过的声音优先；否则取质量最高的一条
+  function resolveVoice() {
+    const list = englishVoices();
+    if (!list.length) return null;
+    const pref = (state && state.ttsVoice) || "";
+    if (pref) {
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].name === pref || list[i].voiceURI === pref) return list[i];
+      }
+    }
+    return list[0];
+  }
+
+  // 语速：慢/正常/快；长句（阅读原句）略快于单词
+  function rateBase(len) {
+    const t = (state && state.ttsRate) || "normal";
+    const long = len > 120;
+    if (t === "slow") return long ? 0.78 : 0.72;
+    if (t === "fast") return long ? 1.12 : 1.06;
+    return long ? 0.95 : 0.9;
+  }
+
+  /* 设置页的「朗读声音」选择器 */
+  function ttsVoiceField() {
+    const list = englishVoices();
+    const opts = ['<option value=""' + (!(state && state.ttsVoice) ? " selected" : "") + '>自动选择（质量最高优先）</option>'];
+    if (list.length) {
+      for (const v of list.slice(0, 24)) {
+        const natural = /natural|neural|online/i.test(v.name || "");
+        opts.push('<option value="' + esc(v.name) + '"' + (state && state.ttsVoice === v.name ? " selected" : "") + '>'
+          + esc(v.name) + " · " + esc(String(v.lang || "").replace("_", "-")) + (natural ? " · 神经网络" : (v.localService ? " · 本地" : " · 在线")) + '</option>');
+      }
+    } else {
+      opts.push('<option disabled>当前浏览器/设备未检测到英文语音</option>');
+    }
+    return `<div class="field" style="margin-top:10px"><label for="ttsVoiceSelect">朗读声音</label><select id="ttsVoiceSelect">${opts.join("")}</select></div>`;
   }
 
   function initBuiltinTts() {
@@ -282,7 +319,7 @@
 
   function speakNative(text) {
     if (!("speechSynthesis" in window)) return false;
-    const voice = pickEnglishVoice();
+    const voice = resolveVoice();
     if (!voice) return false;
     const synth = window.speechSynthesis;
     let busy = false;
@@ -296,7 +333,7 @@
           const u = new SpeechSynthesisUtterance(chunks[i]);
           u.voice = voice;
           u.lang = voice.lang || "en-US";
-          u.rate = chunks[i].length > 120 ? 0.95 : 0.92; // 句子稍快，单词稍慢更清楚
+          u.rate = rateBase(chunks[i].length);
           u.pitch = 1;
           u.volume = 1;
           if (i === 0) u.onerror = function () { speakBuiltin(text); };
@@ -306,8 +343,10 @@
         speakBuiltin(text);
       }
     }
-    // Windows 在「取消后立即开始」时大概率出现静音/迟滞，中断重播时延迟一拍启动
-    speakDelay = setTimeout(start, busy ? 80 : 10);
+    // Windows 在「取消后立即开始」时大概率静音/迟滞，中断重播延迟一拍；
+    // 空闲时同步播（iOS Safari 要求 speak 与用户手势同帧）。
+    if (busy) speakDelay = setTimeout(start, 80);
+    else start();
     return true;
   }
 
@@ -370,6 +409,8 @@
       examDate: defaultExamDate(),
       dailyWords: 30,
       ttsMode: "auto",
+      ttsVoice: "",
+      ttsRate: "normal",
       words: {},
       notebook: [],
       mistakes: [],
@@ -452,6 +493,8 @@
     if (!/^\d{4}-\d{2}-\d{2}$/.test(merged.examDate)) merged.examDate = base.examDate;
     merged.dailyWords = Math.min(100, Math.max(5, Number(merged.dailyWords) || 30));
     merged.ttsMode = TTS_MODES.indexOf(merged.ttsMode) !== -1 ? merged.ttsMode : "auto";
+    merged.ttsVoice = typeof merged.ttsVoice === "string" ? merged.ttsVoice.slice(0, 160) : "";
+    merged.ttsRate = ["slow", "normal", "fast"].indexOf(merged.ttsRate) !== -1 ? merged.ttsRate : "normal";
     return merged;
   }
 
@@ -2757,8 +2800,7 @@
   }
 
   function meRecords() {
-    const trapLine = trapLifetimeLine();
-    const rows = [];
+    const trapLine = trapLifetimeLine();    const rows = [];
     let totalTask = 0;
     let totalWord = 0;
     let totalMin = 0;
@@ -2804,7 +2846,13 @@
               <button class="chip ${state.ttsMode === "native" ? "on" : ""}" data-action="set-tts" data-mode="native">系统语音</button>
               <button class="chip ${state.ttsMode === "builtin" ? "on" : ""}" data-action="set-tts" data-mode="builtin">内置语音</button>
             </div>
-            <p class="mini-note">自动：优先系统英文语音；浏览器没有英文语音时，自动改用内置离线语音。系统语音不可用时，也可以在词条里直接切到“内置语音”。</p>
+            ${ttsVoiceField()}
+            <div class="chips">
+              <button class="chip ${state.ttsRate === "slow" ? "on" : ""}" data-action="set-rate" data-rate="slow">语速 慢</button>
+              <button class="chip ${state.ttsRate === "normal" ? "on" : ""}" data-action="set-rate" data-rate="normal">语速 正常</button>
+              <button class="chip ${state.ttsRate === "fast" ? "on" : ""}" data-action="set-rate" data-rate="fast">语速 快</button>
+            </div>
+            <p class="mini-note">自动：优先系统英文语音，联网时选中的神经网络音（Aria/Jenny 等）最自然；浏览器没有英文语音时改用内置离线语音。改语速或换声音后会自动试读一句。</p>
             <button class="text-link" data-action="test-tts">试听一句</button>
           </div>
           <div class="field">
@@ -3106,6 +3154,16 @@
       }
       case "test-tts": {
         speak("Reading is not a race. Slow down, and the argument will become clear.");
+        break;
+      }
+      case "set-rate": {
+        if (["slow", "normal", "fast"].indexOf(data.rate) !== -1) {
+          state.ttsRate = data.rate;
+          save();
+          rerender();
+          speak("Reading is not a race.");
+          toast("语速已调整，正在试读");
+        }
         break;
       }
       case "flip-card":
@@ -3789,6 +3847,12 @@
         save();
         rerender();
         toast("每日词汇量已设为 " + n);
+      }
+      if (t.id === "ttsVoiceSelect") {
+        state.ttsVoice = t.value || "";
+        save();
+        toast(state.ttsVoice ? "已选定朗读声音并试读" : "已恢复自动选择声音");
+        speak("This is the voice you have chosen.");
       }
       if (t.id === "importFile") {
         const file = t.files && t.files[0];
