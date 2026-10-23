@@ -12,7 +12,7 @@ const FILES = [
   "evidence.js", "evidence-extra.js", "evidence-more.js", "evidence-extra2.js",
   "traps.js", "traps-more.js",
   "exercises.js", "exercises-extra.js", "exercises-more.js",
-  "newtypes.js", "newtypes-more.js",
+  "newtypes.js", "newtypes-more.js", "newtypes-extra.js",
   "translation.js", "translation-extra.js", "translation-more.js", "translation-extra2.js", "translation-passages.js",
   "writing.js", "writing-more.js", "writing-phrases.js",
   "plan.js"
