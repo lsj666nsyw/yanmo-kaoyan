@@ -11,13 +11,15 @@ const TMP = "C:\\Users\\21821\\AppData\\Local\\Temp\\opencode";
 const SOURCES = [
   { file: "kaoyan-full.jsonl", url: "https://raw.githubusercontent.com/KyleBing/english-vocabulary/master/full_line_jsonl/full/%E6%AD%A3%E5%BA%8F/%E8%80%83%E7%A0%94.jsonl" },
   { file: "kaoyan-cet6.jsonl", url: "https://raw.githubusercontent.com/KyleBing/english-vocabulary/master/full_line_jsonl/full/%E6%AD%A3%E5%BA%8F/%E5%85%AD%E7%BA%A7.jsonl" },
-  { file: "kaoyan-high.jsonl", url: "https://raw.githubusercontent.com/KyleBing/english-vocabulary/master/full_line_jsonl/full/%E6%AD%A3%E5%BA%8F/%E9%AB%98%E4%B8%AD.jsonl" }
+  { file: "kaoyan-high.jsonl", url: "https://raw.githubusercontent.com/KyleBing/english-vocabulary/master/full_line_jsonl/full/%E6%AD%A3%E5%BA%8F/%E9%AB%98%E4%B8%AD.jsonl" },
+  { file: "kaoyan-cet4.jsonl", url: "https://raw.githubusercontent.com/KyleBing/english-vocabulary/master/full_line_jsonl/full/%E6%AD%A3%E5%BA%8F/%E5%9B%9B%E7%BA%A7.jsonl" },
+  { file: "kaoyan-ielts.jsonl", url: "https://raw.githubusercontent.com/KyleBing/english-vocabulary/master/full_line_jsonl/full/%E6%AD%A3%E5%BA%8F/%E9%9B%85%E6%80%9D.jsonl" }
 ];
 
 function loadVocab() {
   const ctx = { window: {} };
   vm.createContext(ctx);
-  for (const f of ["vocab.js", "vocab-rare.js", "vocab-supplement.js", "vocab-more.js", "vocab-extra2.js"]) {
+  for (const f of ["vocab.js", "vocab-rare.js", "vocab-supplement.js", "vocab-more.js", "vocab-extra2.js", "vocab-extra3.js"]) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, "data", f), "utf8"), ctx, { filename: f });
   }
   const seen = new Set();
@@ -137,12 +139,21 @@ function collectDefs(c) {
   return out;
 }
 
+// 源词典 pCn 有时夹带超长注解或第三个义项（多为词条外内容），压缩为前两段
+function phraseCn(cn) {
+  let t = clean(cn);
+  if (!t) return "";
+  t = t.replace(/（[^）]{12,}）/g, "").replace(/\([^)]{12,}\)/g, "").trim();
+  const segs = t.split(/[；;]/).map(clean).filter(Boolean);
+  return clean(segs.slice(0, 2).join("；"));
+}
+
 function collectPhrases(w, c) {
   const out = [];
   if (c && c.phrase && Array.isArray(c.phrase.phrases)) {
     for (const p of c.phrase.phrases) {
       const en = clean(p.pContent);
-      const cn = clean(p.pCn);
+      const cn = phraseCn(p.pCn);
       if (!en || !cn) continue;
       out.push(en + " " + cn);
     }
@@ -225,11 +236,69 @@ function collectFamily(c) {
   return out.slice(0, 6);
 }
 
+// 记忆方法（Kyle 词库 remMethod，词根词缀/联想记忆）→ drawer「记忆」区块
+function collectMemo(c) {
+  if (!c || !c.remMethod) return "";
+  let t = clean(typeof c.remMethod === "string" ? c.remMethod : c.remMethod.val);
+  if (!t) return "";
+  t = t.replace(/^记[:：\s]*/, "");
+  if (t.length > 180) {
+    const cut = t.slice(0, 180);
+    const stop = Math.max(cut.lastIndexOf("。"), cut.lastIndexOf("；"), cut.lastIndexOf("！"), cut.lastIndexOf("？"));
+    t = (stop > 60 ? cut.slice(0, stop + 1) : cut) + "…";
+  }
+  return t;
+}
+
+/* Kyle 词表覆盖不到的词条音标（易混词组与个别无源词），手写补充。 */
+const PH_FIX = {
+  "apprehend": "ˌæprɪˈhend",
+  "candid": "ˈkændɪd",
+  "contingent": "kənˈtɪndʒənt",
+  "endowment": "ɪnˈdaʊmənt",
+  "enumerate": "ɪˈnjuːməreɪt",
+  "institutional": "ˌɪnstɪˈtjuːʃənl",
+  "niche": "ˈniːʃ",
+  "quarantine": "ˈkwɒrəntiːn",
+  "serene": "səˈriːn",
+  "sibling": "ˈsɪblɪŋ",
+  "disparity": "dɪˈspærəti",
+  "resilient": "rɪˈzɪliənt",
+  "inclined": "ɪnˈklaɪnd",
+  "deter": "dɪˈtɜː",
+  "affect / effect": "əˈfekt · ɪˈfekt",
+  "adapt / adopt / adept": "əˈdæpt · əˈdɒpt · əˈdept",
+  "principal / principle": "ˈprɪnsəpl · ˈprɪnsəpl",
+  "complement / compliment": "ˈkɒmplɪment · ˈkɒmplɪmənt",
+  "ensure / assure / insure": "ɪnˈʃʊə · əˈʃʊə · ɪnˈʃʊə",
+  "rise / raise / arise": "raɪz · reɪz · əˈraɪz",
+  "lie / lay": "laɪ · leɪ",
+  "economic / economical": "ˌiːkəˈnɒmɪk · ˌiːkəˈnɒmɪkl",
+  "historic / historical": "hɪˈstɒrɪk · hɪˈstɒrɪkl",
+  "sensible / sensitive": "ˈsensəbl · ˈsensətɪv",
+  "continual / continuous": "kənˈtɪnjuəl · kənˈtɪnjuəs",
+  "alternate / alternative": "ˈɔːltəneɪt · ɔːlˈtɜːnətɪv",
+  "imaginary / imaginative / imaginable": "ɪˈmædʒɪnəri · ɪˈmædʒɪnətɪv · ɪˈmædʒɪnəbl",
+  "respectable / respectful / respective": "rɪˈspektəbl · rɪˈspektfl · rɪˈspektɪv",
+  "beside / besides": "bɪˈsaɪd · bɪˈsaɪdz",
+  "farther / further": "ˈfɑːðə · ˈfɜːðə",
+  "later / latter": "ˈleɪtə · ˈlætə",
+  "moral / morale": "ˈmɒrəl · məˈrɑːl",
+  "personal / personnel": "ˈpɜːsənl · ˌpɜːsəˈnel",
+  "precede / proceed": "prɪˈsiːd · prəˈsiːd",
+  "stationary / stationery": "ˈsteɪʃənri · ˈsteɪʃənri",
+  "statue / status / statute": "ˈstætjuː · ˈsteɪtəs · ˈstætjuːt",
+  "confirm / conform": "kənˈfɜːm · kənˈfɔːm",
+  "elicit / illicit": "ɪˈlɪsɪt · ɪˈlɪsɪt",
+  "device / devise": "dɪˈvaɪs · dɪˈvaɪz"
+};
+
 const DET = new Set("a an the this that these those its their his her our your my".split(/\s+/));
 const BREAK = new Set(("it they he she we you i who whom whose which what when where why how and or but nor so yet " +
   "if because while although though since until unless whether than as is are was were be been being am do does did have has had " +
   "can could may might will would shall should must not no").split(/\s+/));
 const PREP = new Set("to of in on at by with from into through during before after above below between among against about up down out off over under".split(/\s+/));
+const POSS = new Set("this that these those its their his her our your my".split(/\s+/));
 const STOP = new Set(("a an the this that these those it its their his her our your my we they he she you i " +
   "is are was were be been being am do does did have has had can could may might will would shall should must " +
   "not no as than so such very more most less least also just only even still yet already often sometimes always never ever " +
@@ -265,25 +334,47 @@ function wordForms(w) {
   return f;
 }
 
-function translateChunk(chunk, w, zhMap) {
+// zhMap 查找带最小的屈折还原（复数/分词/动名词）
+function zlookup(zhMap, low) {
+  if (zhMap.has(low)) return zhMap.get(low);
+  const tries = [];
+  const s = low.replace(/(?:ies|es|s)$/, "");
+  if (s !== low) tries.push(s);
+  const y = low.replace(/ies$/, "y");
+  if (y !== low) tries.push(y);
+  const g1 = low.replace(/ing$/, "");
+  if (g1 !== low) tries.push(g1);
+  const g2 = low.replace(/ing$/, "e");
+  if (g2 !== low) tries.push(g2);
+  const e1 = low.replace(/ed$/, "");
+  if (e1 !== low) tries.push(e1);
+  const e2 = low.replace(/ed$/, "e");
+  if (e2 !== low) tries.push(e2);
+  for (const t of tries) if (t.length > 2 && zhMap.has(t)) return zhMap.get(t);
+  return "";
+}
+
+// 短语 gloss：动词短语按「动宾」取前两个译义；名词 of 结构按「Y的X」倒装；
+// 信息不足时退回「（本词义）」。
+function glossOf(tokens, w, zhMap) {
   const forms = wordForms(w.w);
   const targetCn = firstCn(w.cn) || "";
   const cns = [];
-  for (const tok of chunk) {
+  const isVerb = /^(v|vt|vi)/.test(String(w.pos || "").toLowerCase());
+  for (const tok of tokens) {
     const low = tok.toLowerCase();
-    if (STOP.has(low)) continue;
+    if (STOP.has(low) || low === "of") continue;
     if (forms.some(function (f) { return low === f || low.indexOf(f) === 0; })) {
-      if (targetCn) cns.push(targetCn);
+      if (targetCn && cns.indexOf(targetCn) === -1) cns.push(targetCn);
       continue;
     }
-    const z = zhMap.get(low);
-    if (z) cns.push(z);
+    const z = zlookup(zhMap, low);
+    if (z && cns.indexOf(z) === -1) cns.push(z);
   }
   if (cns.length >= 2) {
-    if (chunk.indexOf("of") !== -1 && !/^(v|vt|vi)/.test(String(w.pos || "").toLowerCase())) {
-      return cns.slice(1).join("") + "的" + cns[0];
-    }
-    return cns.join("");
+    if (isVerb) return cns.slice(0, 2).join("");
+    if (tokens.some(function (t) { return t.toLowerCase() === "of"; })) return cns[1] + "的" + cns[0];
+    return cns.slice(0, 2).join("");
   }
   return targetCn ? "（" + targetCn + "）" : "";
 }
@@ -302,23 +393,30 @@ function derivePhrases(w, ex, zhMap) {
     if (forms.some(function (f) { return low === f || low.indexOf(f) === 0; })) idxs.push(i);
   }
   const pos = String(w.pos || "").toLowerCase();
+  const isVerbPattern = /^(v|vt|vi)/.test(pos);
   const out = [];
   for (const i of idxs.slice(0, 3)) {
     const chunk = [];
-    if (/^(v|vt|vi)/.test(pos)) {
+    if (isVerbPattern) {
       chunk.push(tokens[i]);
       for (let j = i + 1; j < tokens.length && chunk.length < 5; j++) {
         const low = tokens[j].toLowerCase();
         if (BREAK.has(low)) break;
         if (DET.has(low)) { chunk.push(tokens[j]); continue; }
         if (PREP.has(low)) { chunk.push(tokens[j]); continue; }
+        if (POSS.has(low)) break; // 物主/指示词开头的宾语（如 your grandmother）不是通用搭配，截断
         chunk.push(tokens[j]);
         if (chunk.length >= 3 && !DET.has(tokens[j - 1].toLowerCase()) && !PREP.has(tokens[j - 1].toLowerCase())) break;
       }
+      // 去掉栈里已带入的 POSS 词及其后缀
+      const pi = chunk.findIndex(function (t, x) { return x > 0 && POSS.has(t.toLowerCase()); });
+      if (pi > 0) chunk.length = pi;
     } else if (/^(a|adj)/.test(pos)) {
       chunk.push(tokens[i]);
       if (tokens[i + 1] && !BREAK.has(tokens[i + 1].toLowerCase()) && !DET.has(tokens[i + 1].toLowerCase())) chunk.push(tokens[i + 1]);
     } else {
+      // 前邻是专名（大写开头）时是「Knicks versus」类片段，跳过
+      if (i > 0 && /^[A-Z]/.test(tokens[i - 1])) continue;
       if (tokens[i - 1] && !BREAK.has(tokens[i - 1].toLowerCase()) && !DET.has(tokens[i - 1].toLowerCase()) && !PREP.has(tokens[i - 1].toLowerCase())) chunk.push(tokens[i - 1]);
       chunk.push(tokens[i]);
       if (tokens[i + 1] && tokens[i + 1].toLowerCase() === "of" && tokens[i + 2]) {
@@ -326,16 +424,25 @@ function derivePhrases(w, ex, zhMap) {
         if (!DET.has(tokens[i + 2].toLowerCase())) chunk.push(tokens[i + 2]);
       }
     }
-    const targetCn = firstCn(w.cn);
-    const gloss = targetCn ? "（" + targetCn + "）" : "";
+    const gloss = glossOf(chunk, w, zhMap);
     if (chunk.length >= 2) out.push(chunk.join(" ") + " " + gloss);
     // wider context: keeps prepositions and one or two surrounding words, still a real fragment
     let a = Math.max(0, i - 2);
     let b = Math.min(tokens.length, i + 4);
     while (a < i && (BREAK.has(tokens[a].toLowerCase()) || DET.has(tokens[a].toLowerCase()))) a++;
     const wide = tokens.slice(a, b);
-    if (wide.length > chunk.length + 1 && wide.length >= 3 && !DET.has(wide[0].toLowerCase())) {
-      out.push(wide.join(" ") + " " + gloss);
+    // 末尾的连接词/冠词（如 …and / …the）是截断噪声，剪掉
+    while (wide.length && (BREAK.has(wide[wide.length - 1].toLowerCase()) || DET.has(wide[wide.length - 1].toLowerCase()) || POSS.has(wide[wide.length - 1].toLowerCase()))) wide.pop();
+    // 片段里出现 2 个以上专名（如 New York Knicks versus the LA Lakers）则为专有场景，跳过
+    let caps = 0;
+    for (let t = 1; t < wide.length; t++) if (/^[A-Z]/.test(wide[t])) caps++;
+    if (caps >= 2) continue;
+    if (wide.length > chunk.length + 1 && wide.length >= 3 && !DET.has(wide[0].toLowerCase()) && !BREAK.has(wide[0].toLowerCase())) {
+      // gloss 从关键词起翻译；关键词前的主语/中心词有译义时以「X：」标出
+      let wg = glossOf(wide.slice(i - a), w, zhMap);
+      const head = (i - a > 0 && wg && wg.indexOf("（") !== 0) ? zlookup(zhMap, wide[0].toLowerCase()) : "";
+      if (head) wg = head + "：" + wg;
+      out.push(wide.join(" ") + " " + (wg || gloss));
     }
     // short particle pattern for verbs: "adhere to", "allege that"
     if (chunk.length === 1 && tokens[i + 1] && (PREP.has(tokens[i + 1].toLowerCase()) || tokens[i + 1].toLowerCase() === "that")) {
@@ -343,6 +450,31 @@ function derivePhrases(w, ex, zhMap) {
     }
   }
   return unique(out);
+}
+
+// 抽干作拼结果按英文去重：同一搭配只保留第一条（源词典优先）
+function enKey(p) {
+  const m = /^(.*?)(?:\s*[\u4e00-\u9fff（(]|$)/.exec(String(p));
+  return m[1].replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function dedupePhr(list) {
+  const seen = new Set();
+  return (list || []).filter(function (p) {
+    const k = enKey(p);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+// 例句要完整、有信息量：优先 25～160 字符、带译文的句子，长度越接近 90 越好
+function pickEx(list) {
+  if (!list || !list.length) return null;
+  const good = list.filter(function (s) { return s && s.en && s.cn && s.en.length >= 25 && s.en.length <= 160; });
+  if (!good.length) return list[0] || null;
+  good.sort(function (x, y) { return Math.abs(x.en.length - 90) - Math.abs(y.en.length - 90); });
+  return good[0];
 }
 
 function firstPos(w, defs) {
@@ -429,7 +561,7 @@ async function main() {
   const zhMap = buildZhMap(map);
   const existing = loadExisting();
   const out = {};
-  const stats = { total: vocab.length, fromSource: 0, fromBase: 0, missing: [], incomplete: [], curated: 0 };
+  const stats = { total: vocab.length, fromSource: 0, fromBase: 0, missing: [], incomplete: [], curated: 0, memo: 0, phMissing: [] };
   for (const w of vocab) {
     const old = existing[w.w];
     const c = srcContent(w.w, map);
@@ -452,7 +584,7 @@ async function main() {
       };
       stats.curated++;
     } else if (c) {
-      const ex = sents[0] || { en: base.ex, cn: base.exCn };
+      const ex = pickEx(sents) || { en: base.ex, cn: base.exCn };
       entry = {
         use: buildUse(w, c, defs, phr),
         phr: phr,
@@ -466,6 +598,7 @@ async function main() {
       stats.fromBase++;
     }
     entry = mergePartial(entry, old);
+    if (Array.isArray(entry.phr)) entry.phr = dedupePhr(entry.phr);
     // fill missing fields from base / source without overwriting curated content
     if (!entry.use) entry.use = base.use;
     if (!Array.isArray(entry.phr) || !entry.phr.length) entry.phr = base.phr;
@@ -477,8 +610,25 @@ async function main() {
     if (defs.length) entry.defs = defs.slice(0, 6);
     if (syns.length) entry.syn = syns;
     if (family.length) entry.family = family;
-    const ph = clean(w.ph) || (c && (clean(c.ukphone) || clean(c.usphone))) || "";
-    if (ph) entry.ph = ph;
+    const ph = clean(w.ph) || (c && (clean(c.ukphone) || clean(c.usphone) || clean(c.phone))) || clean(PH_FIX[w.w]) || "";
+    if (ph) entry.ph = ph; else stats.phMissing.push(w.w);
+    if (old && old.memo) { entry.memo = old.memo; stats.memo++; }
+    else {
+      let m = collectMemo(c);
+      if (!m) {
+        // 易混词组条目：从组分词聚合各自的记忆方法
+        const parts = String(w.w).split("/").map(clean).filter(function (x) { return x && !/[\u4e00-\u9fa5]/.test(x); });
+        if (parts.length > 1) {
+          const got = [];
+          for (const p of parts) {
+            const pm = collectMemo(srcContent(p, map));
+            if (pm) got.push(p + "：" + pm);
+          }
+          if (got.length >= 2) m = got.join("；");
+        }
+      }
+      if (m) { entry.memo = m; stats.memo++; }
+    }
     out[w.w] = entry;
     const bad = [];
     if (!entry.use) bad.push("use");
@@ -499,6 +649,9 @@ async function main() {
     fromSource: stats.fromSource,
     fromBase: stats.fromBase,
     curated: stats.curated,
+    memo: stats.memo,
+    phMissing: stats.phMissing.length,
+    phMissingSample: stats.phMissing.slice(0, 20),
     incomplete: stats.incomplete.length,
     missingSample: stats.incomplete.slice(0, 20)
   }, null, 2));

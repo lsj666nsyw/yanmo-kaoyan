@@ -1,8 +1,10 @@
 {
-  "total": 1473,
-  "fromSource": 1332,
-  "fromBase": 9,
+  "total": 1770,
+  "fromSource": 1634,
+  "fromBase": 4,
   "missing": [],
   "incomplete": [],
-  "curated": 132
+  "curated": 132,
+  "memo": 994,
+  "phMissing": []
 }

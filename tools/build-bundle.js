@@ -6,7 +6,7 @@ const path = require("path");
 
 const ROOT = path.resolve(__dirname, "..");
 const FILES = [
-  "vocab.js", "vocab-rare.js", "vocab-supplement.js", "vocab-more.js", "vocab-extra2.js",
+  "vocab.js", "vocab-rare.js", "vocab-supplement.js", "vocab-more.js", "vocab-extra2.js", "vocab-extra3.js",
   "sentences.js", "sentences-extra.js", "sentences-more.js",
   "reading.js", "reading-extra.js", "reading-more.js", "reading-extra2.js",
   "evidence.js", "evidence-extra.js", "evidence-more.js", "evidence-extra2.js",
@@ -30,9 +30,9 @@ for (const f of FILES) {
 fs.writeFileSync(path.join(ROOT, "data", "all-data.js"), out, "utf8");
 
 let html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
-const start = html.indexOf('<script src="data/vocab.js"></script>');
-const end = html.indexOf('<script src="js/app.js"></script>');
-if (start === -1 || end === -1 || end <= start) throw new Error("script block not found");
-html = html.slice(0, start) + '<script src="data/all-data.js"></script>\n' + html.slice(end);
+// 幂等替换：无论此前是 data/vocab.js 行还是 data/all-data.js 行，都归并为单行 all-data（保留 defer）
+const re = /<script src="data\/(?:all-data|vocab)\.js"[^>]*><\/script>\n?/;
+if (!re.test(html)) throw new Error("script block not found");
+html = html.replace(re, "<script src=\"data/all-data.js\" defer></script>\n");
 fs.writeFileSync(path.join(ROOT, "index.html"), html, "utf8");
 console.log("bundle", (fs.statSync(path.join(ROOT, "data", "all-data.js")).size / 1024).toFixed(0) + " KB", "files", FILES.length);

@@ -1234,7 +1234,8 @@ table.data .em { font-family: var(--serif); font-size: 13px; color: var(--accent
 .sense-pos { margin-right: 6px; font-family: var(--mono); font-size: 10px; color: var(--accent); }
 .sense-en { display: block; margin-top: 2px; font-size: 10.5px; color: var(--muted); line-height: 1.7; }
 .drawer-syn { display: flex; flex-wrap: wrap; gap: 5px; }
-.drawer-syn span { padding: 3px 8px; border: 1px solid var(--line-2); font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); background: var(--card); }
+.drawer-syn span { padding: 3px 8px; border: 1px solid var(--line-2); font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); background: var(--card); overflow-wrap: anywhere; }
+.drawer-syn span, .drawer-phr li, .drawer-senses li, .drawer-block .block-text { overflow-wrap: anywhere; }
 .drawer-deep { padding: 14px 16px; border-left: 2px solid var(--accent); background: var(--card); }
 .flash-use { margin-top: 10px; font-size: 12px; line-height: 1.75; color: var(--ink-2); }
 .flash-phr { margin-top: 8px; font-family: var(--mono); font-size: 10.5px; line-height: 1.7; color: var(--muted); }

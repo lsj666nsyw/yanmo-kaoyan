@@ -21,6 +21,11 @@
     const map = window.VOCAB_DETAIL || {};
     return w ? (map[w.w] || null) : null;
   }
+  function detailPh(w) {
+    if (w && w.ph) return w.ph;
+    const d = wordDetail(w);
+    return d && d.ph ? d.ph : "";
+  }
   function hasDetail(w) {
     const d = wordDetail(w);
     return !!(d && d.use && Array.isArray(d.phr) && d.phr.length && d.ex && d.exCn && d.deep);
@@ -189,18 +194,20 @@
   }
 
   function pickEnglishVoice() {
-    const list = (nativeVoiceList && nativeVoiceList.length)
+    let list = (nativeVoiceList && nativeVoiceList.length)
       ? nativeVoiceList
       : (("speechSynthesis" in window) ? (window.speechSynthesis.getVoices() || []) : []);
+    if (!list.length) return null;
     const en = list.filter(function (v) { return /^en([-_]|$)/i.test(v.lang || ""); });
     if (!en.length) return null;
     const score = function (v) {
+      const name = (v.name || "").toLowerCase();
       let s = 0;
-      if (/^en-US/i.test(v.lang || "")) s += 5;
-      if (/^en-GB/i.test(v.lang || "")) s += 3;
-      if (v.localService) s += 4;
-      if (/zira|aria|jenny|guy|david|mark|samantha|daniel|google us english/i.test(v.name || "")) s += 3;
-      if (/natural|neural/i.test(v.name || "")) s += 2;
+      if (/natural|neural|online/i.test(name)) s += 8;      // Windows 11「Aria Online (Natural)」等
+      if (/^en-us/i.test(v.lang || "")) s += 3;
+      if (/^en-gb/i.test(v.lang || "")) s += 2;
+      if (/aria|jenny|ana|emma|michelle|guy|zira|samantha|daniel|serena|google/i.test(name)) s += 3;
+      if (v.localService) s += 1;
       return s;
     };
     en.sort(function (a, b) { return score(b) - score(a); });
@@ -246,7 +253,7 @@
     }
     try {
       if (meSpeak.stop) meSpeak.stop();
-      meSpeak.speak(text, { speed: 145, amplitude: 100, wordgap: 0 }, function (ok) {
+      meSpeak.speak(text, { speed: 150, amplitude: 100, wordgap: 25 }, function (ok) {
         if (!ok) toast("发音失败，请再点一次");
       });
       return true;
@@ -256,24 +263,52 @@
     }
   }
 
+  // 长文本按句切分后依次入队播放，避免单条超长语音开头延迟大、中途卡顿
+  function speechChunks(text) {
+    if (text.length <= 200) return [text];
+    const parts = [];
+    let buf = "";
+    const segs = text.split(/(?<=[.!?;:])\s+/);
+    for (const s of segs) {
+      if (buf && (buf.length + s.length + 1) > 200) { parts.push(buf); buf = s; }
+      else buf = buf ? buf + " " + s : s;
+      while (buf.length > 380) { parts.push(buf.slice(0, 380)); buf = buf.slice(380); }
+    }
+    if (buf) parts.push(buf);
+    return parts;
+  }
+
+  let speakDelay = null;
+
   function speakNative(text) {
     if (!("speechSynthesis" in window)) return false;
     const voice = pickEnglishVoice();
     if (!voice) return false;
-    try {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.voice = voice;
-      u.lang = voice.lang || "en-US";
-      u.rate = 0.92;
-      u.pitch = 1;
-      u.volume = 1;
-      u.onerror = function () { speakBuiltin(text); };
-      window.speechSynthesis.speak(u);
-      return true;
-    } catch (err) {
-      return false;
+    const synth = window.speechSynthesis;
+    let busy = false;
+    try { busy = !!(synth.speaking || synth.pending); } catch (err) {}
+    if (busy) { try { synth.cancel(); } catch (err) {} }
+    if (speakDelay) { clearTimeout(speakDelay); speakDelay = null; }
+    function start() {
+      try {
+        const chunks = speechChunks(text);
+        for (let i = 0; i < chunks.length; i++) {
+          const u = new SpeechSynthesisUtterance(chunks[i]);
+          u.voice = voice;
+          u.lang = voice.lang || "en-US";
+          u.rate = chunks[i].length > 120 ? 0.95 : 0.92; // 句子稍快，单词稍慢更清楚
+          u.pitch = 1;
+          u.volume = 1;
+          if (i === 0) u.onerror = function () { speakBuiltin(text); };
+          synth.speak(u);
+        }
+      } catch (err) {
+        speakBuiltin(text);
+      }
     }
+    // Windows 在「取消后立即开始」时大概率出现静音/迟滞，中断重播时延迟一拍启动
+    speakDelay = setTimeout(start, busy ? 80 : 10);
+    return true;
   }
 
   function speak(text) {
@@ -826,7 +861,7 @@
     const tag = w.tag ? `<span class="${tagClass(w.tag)}">${tagLabel(w.tag)}</span>` : "";
     return `<li>
       <button class="word-row" data-action="open-word" data-w="${esc(w.w)}">
-        <span class="word-main${longClass}"><b>${esc(w.w)}</b><span class="phon">${w.ph ? "&#47;" + esc(w.ph) + "&#47;" : ""}</span></span>
+        <span class="word-main${longClass}"><b>${esc(w.w)}</b><span class="phon">${detailPh(w) ? "&#47;" + esc(detailPh(w)) + "&#47;" : ""}</span></span>
         <span class="word-cn">${esc(w.cn)}</span>
         <span class="word-tag">${tag}</span>
         <span class="word-status ${st.cls}">${st.label}</span>
@@ -915,7 +950,7 @@
     const front = `
       <span class="flash-tag">${w.tag ? tagLabel(w.tag) : "词条"}</span>
       <span class="flash-word${longClass}">${esc(w.w)}</span>
-      <span class="flash-phon">${w.ph ? "/" + esc(w.ph) + "/" : (w.pos || "")}</span>
+      <span class="flash-phon">${detailPh(w) ? "/" + esc(detailPh(w)) + "/" : (w.pos || "")}</span>
       <span class="flash-hint">点击翻面 · 空格</span>`;
     const back = `
       <span class="flash-tag">${w.tag ? tagLabel(w.tag) : "词条"}</span>
@@ -983,7 +1018,7 @@
       <div class="study-top"><span>拼写测试</span><span>${sp.i + 1} / ${sp.items.length}</span><span>得分 ${sp.score}</span></div>
       <p class="eyebrow" style="margin-top:22px">根据释义写单词</p>
       <p class="spell-cn">${esc(w.cn)}</p>
-      <p class="spell-meta">${esc(w.pos || "")}${w.ph ? " · /" + esc(w.ph) + "/" : ""}${w.note ? " · " + esc(w.note) : ""}</p>
+      <p class="spell-meta">${esc(w.pos || "")}${detailPh(w) ? " · /" + esc(detailPh(w)) + "/" : ""}${w.note ? " · " + esc(w.note) : ""}</p>
       <input class="spell-input" id="spellInput" data-spell-input type="text" autocomplete="off" spellcheck="false" value="${esc(sp.value)}" placeholder="输入英文" ${sp.checked ? "disabled" : ""}>
       <div class="spell-actions">
         ${sp.checked
@@ -1032,6 +1067,7 @@
     const ex = (d && d.ex) || w.ex || "";
     const exCn = (d && d.exCn) || w.exCn || "";
     const deep = d && d.deep ? d.deep : "";
+    const memo = d && d.memo ? d.memo : "";
     const defs = d && Array.isArray(d.defs) ? d.defs : [];
     const syn = d && Array.isArray(d.syn) ? d.syn : [];
     const family = d && Array.isArray(d.family) ? d.family : [];
@@ -1044,7 +1080,7 @@
       <div class="drawer-body">
         <div class="drawer-word">
           <h2 class="${longClass}">${esc(w.w)}</h2>
-          <p class="ph">${w.ph ? "/" + esc(w.ph) + "/" : ""} ${w.pos ? "· " + esc(w.pos) : ""}</p>
+          <p class="ph">${detailPh(w) ? "/" + esc(detailPh(w)) + "/" : ""} ${w.pos ? "· " + esc(w.pos) : ""}</p>
         </div>
         <div class="drawer-tags">${w.tag ? `<span class="${tagClass(w.tag)}">${tagLabel(w.tag)}</span>` : ""}<span class="${st.cls === "known" ? "tag green" : "tag"}">${st.label || "未标记"}</span></div>
         <div class="drawer-actions">
@@ -1063,6 +1099,7 @@
         ${ex ? `<div class="drawer-ex"><p class="block-k">例句</p><p class="en">${esc(ex)}</p><p class="cn">${esc(exCn || "")}</p></div>` : ""}
         ${syn.length ? `<div class="drawer-block"><p class="block-k">近义</p><p class="drawer-syn">${syn.map(function (s) { return `<span>${esc(s)}</span>`; }).join("")}</p></div>` : ""}
         ${family.length ? `<div class="drawer-block"><p class="block-k">词族</p><p class="drawer-syn">${family.map(function (s) { return `<span>${esc(s)}</span>`; }).join("")}</p></div>` : ""}
+        ${memo ? `<div class="drawer-block"><p class="block-k">记忆</p><p class="block-text">${esc(memo)}</p></div>` : ""}
         ${deep ? `<div class="drawer-block drawer-deep"><p class="block-k">辨析</p><p class="block-text">${esc(deep)}</p></div>` : ""}
         <dl class="drawer-facts">
           <div class="row"><dt>状态</dt><dd>${st.label || "尚未标记"}${inBook ? " · 已在生词本" : ""}</dd></div>

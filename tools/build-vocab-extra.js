@@ -1,4 +1,4 @@
-/* 从公开考研词库补充 300 个未收录词条。运行：node tools/build-vocab-extra.js */
+/* 从公开考研词库再补充 300 个未收录词条（第三批，输出 vocab-extra3.js）。运行：node tools/build-vocab-extra.js */
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
@@ -9,7 +9,7 @@ const SRC = "C:\\Users\\21821\\AppData\\Local\\Temp\\opencode\\kaoyan-full.jsonl
 function loadVocab() {
   const ctx = { window: {} };
   vm.createContext(ctx);
-  for (const f of ["vocab.js", "vocab-rare.js", "vocab-supplement.js", "vocab-more.js"]) {
+  for (const f of ["vocab.js", "vocab-rare.js", "vocab-supplement.js", "vocab-more.js", "vocab-extra2.js"]) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, "data", f), "utf8"), ctx, { filename: f });
   }
   return ctx.window.VOCAB || [];
@@ -47,6 +47,7 @@ for (const line of fs.readFileSync(SRC, "utf8").split(/\r?\n/).filter(Boolean)) 
     const pos = posLabel(trans[0].pos);
     const ph = clean(c.ukphone || c.usphone || "");
     const sent = (c.sentence && c.sentence.sentences && c.sentence.sentences[0]) || null;
+    if (!sent || !clean(sent.sContent) || !clean(sent.sCn)) continue; // 第三批要求至少一句真实例句
     const phr = (c.phrase && c.phrase.phrases && c.phrase.phrases[0]) || null;
     rows.push({
       rank: Number(j.wordRank) || 999999,
@@ -70,5 +71,5 @@ const picked = rows.slice(0, 300).map(function (x) {
   return out;
 });
 const header = `/* 从 KyleBing/english-vocabulary（BSD-3-Clause）补充的考研词条；仅用于个人学习。 */\n`;
-fs.writeFileSync(path.join(ROOT, "data", "vocab-extra2.js"), header + "window.VOCAB=(window.VOCAB||[]).concat(" + JSON.stringify(picked, null, 2) + ");\n", "utf8");
+fs.writeFileSync(path.join(ROOT, "data", "vocab-extra3.js"), header + "window.VOCAB=(window.VOCAB||[]).concat(" + JSON.stringify(picked, null, 2) + ");\n", "utf8");
 console.log(JSON.stringify({ candidates: rows.length, added: picked.length, first: picked.slice(0, 12).map(function (x) { return x.w; }) }, null, 2));

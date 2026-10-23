@@ -77,3 +77,31 @@ window.VOCAB_DETAIL = Object.assign(window.VOCAB_DETAIL || {}, {
     deep: "internet 通常与定冠词 the 连用；作定语时可写 internet access，不加 the。不要与 intranet（内网）混淆。"
   }
 });
+
+/* 第三批新增词条（vocab-extra3）搭配补全 */
+window.VOCAB_DETAIL = Object.assign(window.VOCAB_DETAIL || {}, {
+  "concise": { phr: ["a concise summary 简明的总结", "a concise description of 对……的简要描述", "be concise in one's writing 行文简洁"] },
+  "orderly": { phr: ["an orderly crowd 秩序井然的人群", "in an orderly fashion 有条不紊地", "orderly conduct 规范的行为"] },
+  "deceit": { phr: ["practise deceit on sb 对某人玩弄欺骗手段", "a deliberate deceit 蓄意的欺骗", "deceit and dishonesty 欺骗与不诚实"] },
+  "sarcastic": { phr: ["a sarcastic remark 讥讽的话", "sarcastic about 挖苦……", "a sarcastic tone 讥讽的语气"] },
+  "lad": { phr: ["a lad of sixteen 十六岁的小伙子", "a lad from the north 来自北方的小伙子", "lads and lasses 少男少女"] },
+  "ascertain": { phr: ["ascertain the truth 查明真相", "ascertain whether 弄清是否……", "ascertain the cause of 查明……的原因"] },
+  "lavatory": { phr: ["a public lavatory 公共厕所", "flush the lavatory 冲马桶"] },
+  "suppose": { phr: ["be supposed to do sth 应当做某事", "suppose that 假设……", "I suppose so 我想是这样"] },
+  "preclude": { phr: ["preclude sb from doing sth 阻止某人做某事", "preclude the possibility of 排除……的可能性", "preclude any misunderstanding 避免任何误解"] },
+  "clothe": { phr: ["be clothed in 穿着……", "clothe and feed a family 养家糊口", "be clothed in rags 衣衫褴褛"] },
+  "exclaim": { phr: ["exclaim in delight 高兴地大喊", "exclaim at 对……惊叹", "exclaim that 大声说……"] },
+  "acre": { phr: ["an acre of land 一英亩土地", "per acre 每英亩", "acres of 大片的……"] },
+  "torture": { phr: ["under torture 在拷打下", "subject sb to torture 使某人受折磨", "mental torture 精神折磨"] },
+  "criticize": { phr: ["criticize sb for doing sth 因做某事批评某人", "be strongly criticized 受到严厉批评", "criticize the government 批评政府"] },
+  "counterpart": { phr: ["negotiate with one's counterpart 与谈判对手磋商", "a counterpart in ……的对应物", "counterpart funds 配套资金"] },
+  "imitate": { phr: ["imitate others 模仿他人", "imitate a style 模仿风格", "be widely imitated 被广泛模仿"] },
+  "seminar": { phr: ["attend a seminar 参加研讨班", "a seminar on 有关……的研讨班", "seminar room 研讨室"] },
+  "embassy": { phr: ["the Chinese embassy 中国大使馆", "embassy staff 使馆工作人员", "apply at the embassy 在使馆办理申请"] },
+  "versus": { phr: ["A versus B A 对 B", "education versus experience 教育与经验之比", "versus the alternative 与另一种选择的对比"] },
+  "caress": { phr: ["a gentle caress 温柔的爱抚", "caress her hair 轻抚她的头发", "the caress of the wind 微风的轻抚"] },
+  "myth": { phr: ["an ancient myth 古代神话", "the myth of ……的迷思", "debunk a myth 破除迷思"] },
+  "intimidate": { phr: ["intimidate sb into doing sth 威胁某人做某事", "be intimidated by 被……吓住", "intimidate witnesses 威吓证人"] },
+  "adolescent": { phr: ["an adolescent boy 青春期男孩", "adolescent health 青少年健康", "adolescent years 青少年时期"] },
+  "disable": { phr: ["be physically disabled 身有残疾", "disable an alarm 解除警报", "the disabled 残疾人"] }
+});
