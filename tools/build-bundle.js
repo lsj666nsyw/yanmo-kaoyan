@@ -8,8 +8,8 @@ const ROOT = path.resolve(__dirname, "..");
 const FILES = [
   "vocab.js", "vocab-rare.js", "vocab-supplement.js", "vocab-more.js", "vocab-extra2.js", "vocab-extra3.js",
   "sentences.js", "sentences-extra.js", "sentences-more.js",
-  "reading.js", "reading-extra.js", "reading-more.js", "reading-extra2.js",
-  "evidence.js", "evidence-extra.js", "evidence-more.js", "evidence-extra2.js",
+  "reading.js", "reading-extra.js", "reading-more.js", "reading-extra2.js", "reading-extra3.js",
+  "evidence.js", "evidence-extra.js", "evidence-more.js", "evidence-extra2.js", "evidence-extra3.js",
   "traps.js", "traps-more.js",
   "exercises.js", "exercises-extra.js", "exercises-more.js",
   "newtypes.js", "newtypes-more.js", "newtypes-extra.js",
