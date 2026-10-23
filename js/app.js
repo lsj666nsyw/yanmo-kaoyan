@@ -182,6 +182,31 @@
   function refreshNativeVoices() {
     if (!("speechSynthesis" in window)) { nativeVoiceList = []; return; }
     try { nativeVoiceList = window.speechSynthesis.getVoices() || []; } catch (err) { nativeVoiceList = []; }
+    // 设置页开着且语音列表后到时，重渲染让「当前将使用」的提示跟上
+    try {
+      if (nativeVoiceList.length && typeof rerender === "function" && document.querySelector("#ttsVoiceSelect")) rerender();
+    } catch (err) {}
+  }
+
+  /* 预热：在线神经网络音首次合成要连服务并取首包音频(实测首帧要 2~4 秒)。
+     进页面/首次触摸时先派一个静音小请求，把连接提前建好，点词时几乎立刻出声。 */
+  let warmedVoice = false;
+
+  function warmNativeVoice() {
+    if (warmedVoice || !("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+    try { if (synth.speaking || synth.pending) return; } catch (err) { return; }
+    const v = resolveVoice();
+    if (!v) return;   // 语音列表还没就绪：不封锁,下个时机再试
+    warmedVoice = true;
+    try {
+      const u = new SpeechSynthesisUtterance("a");
+      u.voice = v;
+      u.lang = v.lang || "en-US";
+      u.volume = 0;   // 完全静音,只建立服务连接
+      u.rate = 2;
+      synth.speak(u);
+    } catch (err) { warmedVoice = false; }
   }
 
   if ("speechSynthesis" in window) {
@@ -191,6 +216,8 @@
     } else {
       window.speechSynthesis.onvoiceschanged = refreshNativeVoices;
     }
+    // voices 到达后也要各试一次预热(voiceschanged 可能触发多次,函数内部自会锁)
+    try { window.speechSynthesis.addEventListener("voiceschanged", warmNativeVoice); } catch (err) {}
   }
 
   function englishVoices() {
@@ -242,10 +269,10 @@
     } else if (alive.length) {
       out.push(alive[0]);
     }
-    for (let i = 0; i < alive.length; i++) {
-      if (out.indexOf(alive[i]) === -1 && alive[i].localService) out.push(alive[i]);
-    }
-    return out.slice(0, 3);
+    // 手动指定或自动最优 → 本地系统语音兜着 → 在线声再补两个（全都在线的设备避免单点失败直落机械音）
+    const rest = alive.filter(function (v) { return out.indexOf(v) === -1; });
+    for (let i = 0; i < rest.length && out.length < 3; i++) out.push(rest[i]);
+    return out;
   }
 
   // 语速：慢/正常/快；长句（阅读原句）略快于单词
@@ -317,7 +344,9 @@
     try {
       if (meSpeak.stop) meSpeak.stop();
       ttsMarkSpeaking(true);
+      builtinActive = true;
       meSpeak.speak(text, { speed: 150, amplitude: 100, wordgap: 25 }, function (ok) {
+        builtinActive = false;
         ttsMarkSpeaking(false);
         if (!ok) toast("发音失败，请再点一次");
       });
@@ -352,9 +381,23 @@
     try { document.body.classList.toggle("tts-speaking", !!on); } catch (err) {}
   }
 
+  /* 内置离线语音播放中的标记（它不走 speechSynthesis，引擎标志对不上） */
+  let builtinActive = false;
+
+  /* 每秒对齐一次朗读标记：个别引擎正常播完却不回调 onend，标志会一直挂着 */
+  setInterval(function () {
+    if (!document.body.classList.contains("tts-speaking")) return;
+    if (builtinActive) return;
+    if (ttsWatch != null) return;   // 看守挂起中（启动缓冲/换声间隔），不要在空档里误判
+    let idle = false;
+    try { idle = !(window.speechSynthesis.speaking || window.speechSynthesis.pending); } catch (err) {}
+    if (idle) ttsMarkSpeaking(false);
+  }, 1000);
+
   function ttsStop() {
     try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (err) {}
     try { if (window.meSpeak && meSpeak.stop) meSpeak.stop(); } catch (err) {}
+    builtinActive = false;
     if (speakDelay) { clearTimeout(speakDelay); speakDelay = null; }
     if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
     ttsMarkSpeaking(false);
@@ -393,6 +436,10 @@
     function attempt(voice, first) {
       let began = false;
       let settled = false;
+      const startAt = Date.now();
+      const engineAlive = function () {
+        try { return !!(synth.speaking || synth.pending); } catch (err) { return false; }
+      };
       const failStep = function (note) {
         if (settled) return;
         settled = true;
@@ -428,10 +475,19 @@
           }
           synth.speak(u);
         }
-        /* 看门狗：Online (Natural) 神经网络音可能接受播放却永远不出声。
-           首个候选 3 秒、后续候选 2 秒还没 onstart 就判为假死，换下一个声音 */
+        /* 看门狗：在线神经网络音冷启动要连微软语音服务，实测首帧可能要 2~4 秒，
+           引擎还显示“正在合成”就不能定死罪，只有引擎自己放弃或累计挂满 10 秒才换下家 */
+        const watchTick = function () {
+          if (settled || began) return;
+          const waited = Date.now() - startAt;
+          if (engineAlive() && waited < 10000) {
+            ttsWatch = setTimeout(watchTick, 2600);
+            return;
+          }
+          failStep("当前朗读声音没能读出声，已换其他系统语音");
+        };
         if (ttsWatch) clearTimeout(ttsWatch);
-        ttsWatch = setTimeout(function () { failStep("当前朗读声音启动超时，已换其他系统语音"); }, first ? 3000 : 2200);
+        ttsWatch = setTimeout(watchTick, first ? 4800 : 3600);
         ttsMarkSpeaking(true);
       } catch (err) {
         failStep("");
@@ -3908,6 +3964,9 @@
       if (!el || el.disabled) return;
       handleAction(el.getAttribute("data-action"), el);
     });
+
+    // 任何第一次触摸都尝试给在线神经网络音暖场（函数内部自会去重）
+    document.addEventListener("pointerdown", warmNativeVoice, { passive: true });
 
     document.addEventListener("input", function (e) {
       const t = e.target;
