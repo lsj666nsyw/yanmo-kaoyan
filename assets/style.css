@@ -247,6 +247,24 @@ em { font-style: normal; }
 .chip.on { border-color: var(--ink); background: var(--ink); color: var(--paper); }
 .chip .n { margin-left: 5px; font-family: var(--mono); font-size: 9.5px; opacity: .6; }
 
+/* 朗读中：右上角浮出「停止朗读」 */
+.tts-stop {
+  position: fixed; top: 12px; right: 14px; z-index: 95;
+  display: none; align-items: center;
+  padding: 8px 14px; border: 1px solid var(--ink); border-radius: 2px;
+  background: var(--ink); color: var(--paper);
+  font: inherit; font-size: 11px; letter-spacing: .06em; cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .18);
+}
+body.tts-speaking .tts-stop { display: inline-flex; }
+.tts-stop:active { transform: translateY(1px); }
+
+/* 阅读页朗读工具条 */
+.passage-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 18px 0 0; padding-bottom: 14px; border-bottom: 1px solid var(--line);
+}
+
 .set-picker {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   margin: -10px 0 26px;

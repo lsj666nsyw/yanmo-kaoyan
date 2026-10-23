@@ -291,8 +291,10 @@
     try {
       if (meSpeak.stop) meSpeak.stop();
       meSpeak.speak(text, { speed: 150, amplitude: 100, wordgap: 25 }, function (ok) {
+        ttsMarkSpeaking(false);
         if (!ok) toast("发音失败，请再点一次");
       });
+      ttsMarkSpeaking(true);
       return true;
     } catch (err) {
       toast("发音失败：" + (err.message || "未知错误"));
@@ -317,6 +319,18 @@
 
   let speakDelay = null;
 
+  /* 朗读状态：页面上方浮出「停止朗读」按钮 */
+  function ttsMarkSpeaking(on) {
+    try { document.body.classList.toggle("tts-speaking", !!on); } catch (err) {}
+  }
+
+  function ttsStop() {
+    try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (err) {}
+    try { if (window.meSpeak && meSpeak.stop) meSpeak.stop(); } catch (err) {}
+    if (speakDelay) { clearTimeout(speakDelay); speakDelay = null; }
+    ttsMarkSpeaking(false);
+  }
+
   function speakNative(text) {
     if (!("speechSynthesis" in window)) return false;
     const voice = resolveVoice();
@@ -336,9 +350,14 @@
           u.rate = rateBase(chunks[i].length);
           u.pitch = 1;
           u.volume = 1;
-          if (i === 0) u.onerror = function () { speakBuiltin(text); };
+          if (i === 0) u.onerror = function () { ttsMarkSpeaking(false); speakBuiltin(text); };
+          if (i === chunks.length - 1) {
+            u.onend = function () { ttsMarkSpeaking(false); };
+            u.onerror = function () { ttsMarkSpeaking(false); };
+          }
           synth.speak(u);
         }
+        ttsMarkSpeaking(true);
       } catch (err) {
         speakBuiltin(text);
       }
@@ -411,6 +430,7 @@
       ttsMode: "auto",
       ttsVoice: "",
       ttsRate: "normal",
+      cardAutoplay: false,
       words: {},
       notebook: [],
       mistakes: [],
@@ -495,6 +515,7 @@
     merged.ttsMode = TTS_MODES.indexOf(merged.ttsMode) !== -1 ? merged.ttsMode : "auto";
     merged.ttsVoice = typeof merged.ttsVoice === "string" ? merged.ttsVoice.slice(0, 160) : "";
     merged.ttsRate = ["slow", "normal", "fast"].indexOf(merged.ttsRate) !== -1 ? merged.ttsRate : "normal";
+    merged.cardAutoplay = !!merged.cardAutoplay;
     return merged;
   }
 
@@ -1139,7 +1160,7 @@
           return `<li>${x.pos ? `<span class="sense-pos">${esc(x.pos)}</span>` : ""}${esc(x.cn || "")}${x.en ? `<span class="sense-en">${esc(x.en)}</span>` : ""}</li>`;
         }).join("")}</ul></div>` : ""}
         ${phr.length ? `<div class="drawer-block"><p class="block-k">搭配</p><ul class="drawer-phr">${phr.map(function (p) { return `<li>${esc(p)}</li>`; }).join("")}</ul></div>` : (w.note ? `<div class="drawer-block"><p class="block-k">搭配</p><p class="block-text">${esc(w.note)}</p></div>` : "")}
-        ${ex ? `<div class="drawer-ex"><p class="block-k">例句</p><p class="en">${esc(ex)}</p><p class="cn">${esc(exCn || "")}</p></div>` : ""}
+        ${ex ? `<div class="drawer-ex"><p class="block-k">例句</p><p class="en">${esc(ex)} <button class="text-link" data-action="speak" data-text="${esc(ex)}">朗读例句</button></p><p class="cn">${esc(exCn || "")}</p></div>` : ""}
         ${syn.length ? `<div class="drawer-block"><p class="block-k">近义</p><p class="drawer-syn">${syn.map(function (s) { return `<span>${esc(s)}</span>`; }).join("")}</p></div>` : ""}
         ${family.length ? `<div class="drawer-block"><p class="block-k">词族</p><p class="drawer-syn">${family.map(function (s) { return `<span>${esc(s)}</span>`; }).join("")}</p></div>` : ""}
         ${memo ? `<div class="drawer-block"><p class="block-k">记忆</p><p class="block-text">${esc(memo)}</p></div>` : ""}
@@ -1950,6 +1971,11 @@
           <span>约 ${wordCount(r.paragraphs.join(" "))} 词</span><span>建议 ${r.minutes} 分钟</span>
         </div>
       </header>
+
+      <div class="passage-bar">
+        <button class="chip" data-action="speak" data-text="${esc(r.paragraphs.join(" "))}">朗读全文</button>
+        <span class="count-line">开始朗读后，右上角随时可以停止</span>
+      </div>
 
       <div class="reading-layout">
         <div class="passage">${paragraphs}</div>
@@ -2852,6 +2878,9 @@
               <button class="chip ${state.ttsRate === "normal" ? "on" : ""}" data-action="set-rate" data-rate="normal">语速 正常</button>
               <button class="chip ${state.ttsRate === "fast" ? "on" : ""}" data-action="set-rate" data-rate="fast">语速 快</button>
             </div>
+            <div class="chips">
+              <button class="chip ${state.cardAutoplay ? "on" : ""}" data-action="toggle-card-autoplay">卡片切换后自动发音</button>
+            </div>
             <p class="mini-note">自动：优先系统英文语音，联网时选中的神经网络音（Aria/Jenny 等）最自然；浏览器没有英文语音时改用内置离线语音。改语速或换声音后会自动试读一句。</p>
             <button class="text-link" data-action="test-tts">试听一句</button>
           </div>
@@ -2989,7 +3018,9 @@
     }
     ui.cardIndex++;
     ui.cardFlipped = false;
+    const next = list[ui.cardIndex];
     save();
+    if (state.cardAutoplay && next) speak(next.w);
     rerender();
   }
 
@@ -3141,6 +3172,16 @@
       case "speak": {
         const text = data.text || data.w || "";
         if (text) speak(text);
+        break;
+      }
+      case "stop-speak":
+        ttsStop();
+        break;
+      case "toggle-card-autoplay": {
+        state.cardAutoplay = !state.cardAutoplay;
+        save();
+        rerender();
+        toast(state.cardAutoplay ? "已开启：切换卡片后自动朗读单词" : "已关闭卡片自动发音");
         break;
       }
       case "set-tts": {
