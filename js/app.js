@@ -998,6 +998,7 @@
     cardFlipped: false,
     cardSession: { known: 0, fuzzy: 0, unknown: 0, graded: 0 },
     spell: null,
+    listen: null,
     drawerWord: null,
     drawerList: [],
     readId: null,
@@ -1020,6 +1021,7 @@
     sentenceOpen: {},
     sentenceOpened: {},
     transTab: "sentence",
+    transPassage: 1,
     meTab: "notebook",
     redo: {},
     reviewed: {},
@@ -1294,6 +1296,7 @@
           <button class="${ui.vocabMode === "list" ? "on" : ""}" data-action="set-mode" data-mode="list">词表</button>
           <button class="${ui.vocabMode === "card" ? "on" : ""}" data-action="set-mode" data-mode="card">卡片</button>
           <button class="${ui.vocabMode === "spell" ? "on" : ""}" data-action="set-mode" data-mode="spell">拼写</button>
+          <button class="${ui.vocabMode === "listen" ? "on" : ""}" data-action="set-mode" data-mode="listen">听音</button>
         </div>
       </div>
 
@@ -1303,6 +1306,7 @@
   function vocabBody(list) {
     if (ui.vocabMode === "card") return cardBody(list || filteredWords());
     if (ui.vocabMode === "spell") return spellBody();
+    if (ui.vocabMode === "listen") return listenBody();
     const rows = list.slice(0, ui.vocabLimit);
     return `
       <div class="count-line" id="vocabCount">共 ${list.length} 词</div>
@@ -1440,6 +1444,73 @@
       el.focus();
       el.setSelectionRange(el.value.length, el.value.length);
     }
+  }
+
+  /* 听音选义：先听发音，再从四个释义里选一个 */
+  function buildListen() {
+    const pool = filteredWords().filter(function (w) { return w.tag !== "易混" && String(w.cn || "").trim(); });
+    const deck = pool.slice();
+    for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = deck[i]; deck[i] = deck[j]; deck[j] = t; }
+    const items = deck.slice(0, Math.min(10, deck.length)).map(function (w) {
+      const own = String(w.cn).trim();
+      const opts = [{ cn: own, w: w.w }];
+      let guard = 0;
+      while (opts.length < 4 && guard < 400 && pool.length > 4) {
+        guard++;
+        const cand = pool[Math.floor(Math.random() * pool.length)];
+        const cn = String(cand.cn || "").trim();
+        if (!cn || cn === own) continue;
+        if (opts.some(function (o) { return o.cn === cn; })) continue;
+        opts.push({ cn: cn, w: cand.w });
+      }
+      for (let i = opts.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = opts[i]; opts[i] = opts[j]; opts[j] = t; }
+      return { word: w, options: opts, picked: -1, ok: false };
+    });
+    ui.listen = { items: items, i: 0, score: 0 };
+  }
+
+  function listenBody() {
+    if (!ui.listen) buildListen();
+    const ls = ui.listen;
+    if (!ls || !ls.items.length) {
+      return `<div class="empty"><p class="mark">空</p><p>这个分类里没有可听的词条，换个分类试试。</p><div class="actions"><button class="btn btn-quiet" data-action="set-mode" data-mode="list">返回词表</button></div></div>`;
+    }
+    if (ls.i >= ls.items.length) {
+      const total = ls.items.length;
+      return `<div class="study-wrap"><div class="summary">
+        <p class="eyebrow" style="justify-content:center">听音选义</p>
+        <p class="big">${ls.score} <small style="font-size:18px;color:var(--muted)">/ ${total}</small></p>
+        <h2>${ls.score >= Math.ceil(total * 0.8) ? "耳朵跟得上" : "再听一组"}</h2>
+        <p>选错的词已记为“模糊”并加入生词本，回去再看一眼词条。</p>
+        <div class="actions"><button class="btn btn-solid" data-action="listen-restart">再来一组</button><button class="btn btn-quiet" data-action="set-mode" data-mode="list">回到词表</button></div>
+      </div></div>`;
+    }
+    const it = ls.items[ls.i];
+    const w = it.word;
+    const answered = it.picked >= 0;
+    return `<div class="study-wrap">
+      <div class="study-top">
+        <span>听音选义</span>
+        <div class="progress"><span style="width:${Math.round((ls.i + 1) / ls.items.length * 100)}%"></span></div>
+        <span>${ls.i + 1} / ${ls.items.length}</span>
+      </div>
+      <div class="listen-card">
+        <p class="eyebrow" style="justify-content:center">先听发音，再选最接近的释义</p>
+        <button class="btn btn-solid listen-play" data-action="listen-play">${answered ? "再听一遍" : "播放发音"}</button>
+        <div class="listen-options">
+          ${it.options.map(function (o, oi) {
+            let cls = "";
+            if (answered) cls = o.w === w.w ? " ok" : (oi === it.picked ? " no" : "");
+            return `<button class="listen-option${cls}" data-action="listen-pick" data-i="${oi}" ${answered ? "disabled" : ""}>${esc(o.cn)}</button>`;
+          }).join("")}
+        </div>
+        ${answered ? `<div class="listen-answer ${it.ok ? "ok" : "no"}">${it.ok ? "正确" : "正确答案"}：<b>${esc(w.w)}</b>${detailPh(w) ? " /" + esc(detailPh(w)) + "/" : ""} · ${esc(w.cn)}</div>` : ""}
+      </div>
+      <div class="flash-actions">
+        ${answered ? `<button class="btn btn-solid" data-action="listen-next">${ls.i + 1 >= ls.items.length ? "查看结果" : "下一题"}</button>` : ""}
+      </div>
+      <p class="flash-tips">选错会自动记为“模糊”并进生词本。空格键可以重听。</p>
+    </div>`;
   }
 
   /* ------------------------------------------------------------------
@@ -2646,9 +2717,22 @@
   ------------------------------------------------------------------ */
 
   function transEntryByKey(key) {
+    if (/^p\d+$/.test(key)) {
+      const id = Number(String(key).slice(1));
+      const hit = (window.TRANS_PASSAGES || []).find(function (p) { return p.id === id; });
+      return hit || null;
+    }
     if (key === "p") return window.TRANSLATIONS.passage;
     const id = Number(String(key).replace(/^s/, ""));
     return window.TRANSLATIONS.sentences.find(function (s) { return s.id === id; });
+  }
+
+  function passageSets() {
+    const out = [{ id: 1, title: "共享经济", entry: window.TRANSLATIONS.passage }];
+    (window.TRANS_PASSAGES || []).forEach(function (p) {
+      if (p && p.id && p.en) out.push({ id: p.id, title: p.title || ("段落 " + p.id), entry: p });
+    });
+    return out;
   }
 
   function transValue(key) {
@@ -2712,27 +2796,35 @@
   }
 
   function translationPassage() {
-    const key = "p";
-    const entry = window.TRANSLATIONS.passage;
+    const sets = passageSets();
+    const cur = sets.find(function (p) { return p.id === ui.transPassage; }) || sets[0];
+    const key = cur.id === 1 ? "p" : ("p" + cur.id);
+    const entry = cur.entry;
     const open = ui.transOpen[key] === true;
     const value = transValue(key);
     const paragraphs = String(entry.en).split(/\n{2,}/).map(function (p) { return `<p>${esc(p)}</p>`; }).join("");
+    const picker = sets.length > 1 ? `<div class="chips" style="margin-bottom:14px">${sets.map(function (p) {
+      return `<button class="chip ${p.id === cur.id ? "on" : ""}" data-action="trans-passage" data-id="${p.id}">${esc(p.title)}</button>`;
+    }).join("")}</div>` : "";
     return `
-      <article class="trans-item passage-trans">
-        <div class="trans-head">
-          <span class="label">英语二 · 段落翻译</span>
-          <span class="tag">约 ${wordCount(entry.en)} 词</span>
-        </div>
-        <div class="trans-en passage-en">${paragraphs}</div>
-        <div class="trans-tools">
-          <button class="text-link" data-action="toggle-trans" data-key="${key}">${open ? "收起参考" : "对照参考"}</button>
-          <button class="text-link muted" data-action="speak-trans" data-key="${key}">朗读原文</button>
-          <button class="text-link muted" data-action="copy-trans" data-key="${key}">复制参考</button>
-        </div>
-        <textarea class="trans-input trans-input-lg" data-trans-input="${key}" placeholder="按英语二段落翻译的要求，译成连贯的中文。">${esc(value)}</textarea>
-        <div class="trans-count"><span data-trans-count="${key}">已写 ${countChars(value)} 字</span><span>参考译文约 ${countChars(entry.ref)} 字</span></div>
-        ${open ? transRefPanel(entry, key) : ""}
-      </article>`;
+      <div class="trans-passage-head">
+        ${picker}
+        <article class="trans-item passage-trans">
+          <div class="trans-head">
+            <span class="label">英语二 · 段落翻译 · 第 ${cur.id} 篇</span>
+            <span class="tag">约 ${wordCount(entry.en)} 词</span>
+          </div>
+          <div class="trans-en passage-en">${paragraphs}</div>
+          <div class="trans-tools">
+            <button class="text-link" data-action="toggle-trans" data-key="${key}">${open ? "收起参考" : "对照参考"}</button>
+            <button class="text-link muted" data-action="speak-trans" data-key="${key}">朗读原文</button>
+            <button class="text-link muted" data-action="copy-trans" data-key="${key}">复制参考</button>
+          </div>
+          <textarea class="trans-input trans-input-lg" data-trans-input="${key}" placeholder="按英语二段落翻译的要求，译成连贯的中文。">${esc(value)}</textarea>
+          <div class="trans-count"><span data-trans-count="${key}">已写 ${countChars(value)} 字</span><span>参考译文约 ${countChars(entry.ref)} 字</span></div>
+          ${open ? transRefPanel(entry, key) : ""}
+        </article>
+      </div>`;
   }
 
   function transRefPanel(entry, key) {
@@ -3454,6 +3546,7 @@
         ui.cardFlipped = false;
         ui.cardSession = { known: 0, fuzzy: 0, unknown: 0, graded: 0 };
         ui.spell = null;
+        ui.listen = null;
         rerender();
         break;
       }
@@ -3464,8 +3557,11 @@
         ui.cardFlipped = false;
         ui.cardSession = { known: 0, fuzzy: 0, unknown: 0, graded: 0 };
         ui.spell = null;
+        ui.listen = null;
         if (mode === "spell") buildSpell();
+        if (mode === "listen") buildListen();
         render();
+        if (mode === "listen" && ui.listen && ui.listen.items[0]) speak(ui.listen.items[0].word.w);
         break;
       }
       case "load-more": {
@@ -3568,6 +3664,40 @@
       case "spell-restart":
         buildSpell();
         rerender();
+        break;
+      case "listen-play": {
+        const ls = ui.listen;
+        if (ls && ls.items[ls.i]) speak(ls.items[ls.i].word.w);
+        break;
+      }
+      case "listen-pick": {
+        const ls = ui.listen;
+        if (!ls || !ls.items[ls.i]) break;
+        const it = ls.items[ls.i];
+        if (it.picked >= 0) break;
+        it.picked = Number(data.i);
+        const chosen = it.options[it.picked];
+        it.ok = !!(chosen && chosen.w === it.word.w);
+        if (it.ok) ls.score++;
+        else setWordStatus(it.word.w, "fuzzy");
+        rerender();
+        break;
+      }
+      case "listen-next": {
+        const ls = ui.listen;
+        if (!ls) break;
+        ls.i++;
+        rerender();
+        if (ls.i < ls.items.length) {
+          const nx = ls.items[ls.i];
+          if (nx) speak(nx.word.w);
+        }
+        break;
+      }
+      case "listen-restart":
+        buildListen();
+        rerender();
+        if (ui.listen.items[0]) speak(ui.listen.items[0].word.w);
         break;
       case "sentence-level":
         ui.sentenceLevel = data.level;
@@ -3962,6 +4092,11 @@
         ui.transTab = data.tab;
         render();
         break;
+      case "trans-passage": {
+        const id = Number(data.id);
+        if (id) { ui.transPassage = id; rerender(); }
+        break;
+      }
       case "toggle-trans": {
         const key = data.key;
         ui.transOpen[key] = !ui.transOpen[key];
@@ -4293,6 +4428,21 @@
       }
 
       if (typing) return;
+      if (route.name === "vocab" && ui.vocabMode === "listen") {
+        const curIt = ui.listen && ui.listen.items[ui.listen.i];
+        if ((e.key === "Enter" || e.key === " " || e.code === "Space") && curIt && curIt.picked >= 0) {
+          e.preventDefault();
+          const nb = document.querySelector('[data-action="listen-next"]');
+          if (nb) nb.click();
+          return;
+        }
+        if (e.key === " " || e.code === "Space") {
+          e.preventDefault();
+          const b = document.querySelector('[data-action="listen-play"]');
+          if (b) b.click();
+          return;
+        }
+      }
       if (route.name === "vocab" && ui.vocabMode === "card") {
         if (e.key === " " || e.code === "Space") {
           e.preventDefault();
