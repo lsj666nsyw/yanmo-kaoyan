@@ -999,6 +999,7 @@
     cardSession: { known: 0, fuzzy: 0, unknown: 0, graded: 0 },
     spell: null,
     listen: null,
+    dictation: null,
     drawerWord: null,
     drawerList: [],
     readId: null,
@@ -1297,6 +1298,7 @@
           <button class="${ui.vocabMode === "card" ? "on" : ""}" data-action="set-mode" data-mode="card">卡片</button>
           <button class="${ui.vocabMode === "spell" ? "on" : ""}" data-action="set-mode" data-mode="spell">拼写</button>
           <button class="${ui.vocabMode === "listen" ? "on" : ""}" data-action="set-mode" data-mode="listen">听音</button>
+          <button class="${ui.vocabMode === "dictation" ? "on" : ""}" data-action="set-mode" data-mode="dictation">听写</button>
         </div>
       </div>
 
@@ -1307,6 +1309,7 @@
     if (ui.vocabMode === "card") return cardBody(list || filteredWords());
     if (ui.vocabMode === "spell") return spellBody();
     if (ui.vocabMode === "listen") return listenBody();
+    if (ui.vocabMode === "dictation") return dictateBody();
     const rows = list.slice(0, ui.vocabLimit);
     return `
       <div class="count-line" id="vocabCount">共 ${list.length} 词</div>
@@ -1513,6 +1516,90 @@
     </div>`;
   }
 
+  /* 听写：听发音，写出单词，逐字母标出差异 */
+  function buildDictation() {
+    const pool = filteredWords().filter(function (w) {
+      return w.tag !== "易混" && /^[A-Za-z][A-Za-z'’-]*$/.test(String(w.w || "").trim());
+    });
+    const deck = pool.slice();
+    for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = deck[i]; deck[i] = deck[j]; deck[j] = t; }
+    ui.dictation = {
+      items: deck.slice(0, Math.min(10, deck.length)),
+      i: 0,
+      value: "",
+      checked: false,
+      ok: false,
+      score: 0
+    };
+  }
+
+  function dictationDiff(typed, answer) {
+    const a = String(answer || "").split("");
+    const t = String(typed || "").split("");
+    const max = Math.max(a.length, t.length);
+    let answerHtml = "";
+    let typedHtml = "";
+    for (let i = 0; i < max; i++) {
+      const ac = a[i];
+      const tc = t[i];
+      const same = ac != null && tc != null && tc.toLowerCase() === ac.toLowerCase();
+      if (ac != null) answerHtml += `<span class="dch ${same ? "ok" : "no"}">${esc(ac)}</span>`;
+      if (tc != null) typedHtml += `<span class="dch ${same ? "ok" : "no"}">${esc(tc)}</span>`;
+    }
+    return { answerHtml: answerHtml, typedHtml: typedHtml };
+  }
+
+  function dictateBody() {
+    if (!ui.dictation) buildDictation();
+    const dt = ui.dictation;
+    if (!dt.items.length) {
+      return `<div class="empty"><p class="mark">空</p><p>这个分类里没有可听写的单词（词组与易混词不参与听写）。</p><div class="actions"><button class="btn btn-quiet" data-action="set-mode" data-mode="list">返回词表</button></div></div>`;
+    }
+    if (dt.i >= dt.items.length) {
+      return `<div class="study-wrap"><div class="summary">
+        <p class="eyebrow" style="justify-content:center">听写测试</p>
+        <p class="big">${dt.score} <small style="font-size:18px;color:var(--muted)">/ ${dt.items.length}</small></p>
+        <h2>${dt.score >= Math.ceil(dt.items.length * 0.8) ? "拼得很稳" : "再听一组"}</h2>
+        <p>写错的词已记为“模糊”并进生词本，听音时再回来过一遍。</p>
+        <div class="actions"><button class="btn btn-solid" data-action="dictate-restart">再来一组</button><button class="btn btn-quiet" data-action="set-mode" data-mode="list">回到词表</button></div>
+      </div></div>`;
+    }
+    const w = dt.items[dt.i];
+    const diff = dt.checked && !dt.ok ? dictationDiff(dt.value, w.w) : null;
+    return `<div class="study-wrap"><div class="spell-card dictate-card">
+      <div class="study-top"><span>听写测试</span><span>${dt.i + 1} / ${dt.items.length}</span><span>得分 ${dt.score}</span></div>
+      <p class="eyebrow" style="margin-top:22px">先听发音，再写出单词</p>
+      <div class="dictate-play-row">
+        <button class="btn btn-solid dictate-play" data-action="dictate-play">${dt.checked ? "再听一遍" : "播放发音"}</button>
+      </div>
+      <p class="spell-meta">${esc(w.pos || "")}${dt.checked ? " · " + esc(w.cn) : ""}</p>
+      <input class="spell-input" id="dictateInput" data-dictate-input type="text" autocomplete="off" spellcheck="false" autocapitalize="off" value="${esc(dt.value)}" placeholder="输入英文" ${dt.checked ? "disabled" : ""}>
+      <div class="spell-actions">
+        ${dt.checked
+          ? `<button class="btn btn-solid" data-action="dictate-next">${dt.i + 1 >= dt.items.length ? "查看结果" : "下一题"}</button>`
+          : `<button class="btn btn-solid" data-action="dictate-check">检查</button><button class="btn btn-quiet" data-action="dictate-reveal">不会，看答案</button>`}
+      </div>
+      <div class="spell-feedback ${dt.checked ? (dt.ok ? "ok" : "no") : ""}">
+        ${dt.checked ? (dt.ok ? "正确。" : "还差一点。") : ""}
+      </div>
+      ${diff ? `<div class="dictation-diff">
+        <div class="diff-row"><span class="diff-k">你的</span><span class="diff-letters">${diff.typedHtml}</span></div>
+        <div class="diff-row"><span class="diff-k">正确</span><span class="diff-letters">${diff.answerHtml}</span></div>
+      </div>` : ""}
+      ${dt.checked && w.ex ? `<p class="flash-ex" style="margin-top:6px">${esc(w.ex)}<small>${esc(w.exCn || "")}</small></p>` : ""}
+    </div>
+    <p class="flash-tips">听不清就按“再听一遍”；检查后错处会逐字母标出。回车检查 / 下一题。</p></div>`;
+  }
+
+  function focusDictation() {
+    if (getRoute().name !== "vocab" || ui.vocabMode !== "dictation" || ui.drawerWord) return;
+    const el = $("#dictateInput");
+    if (el && !el.disabled) {
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
+  }
+
   /* ------------------------------------------------------------------
      vocabulary drawer
   ------------------------------------------------------------------ */
@@ -1684,6 +1771,9 @@
     }
     if (route.name === "vocab" && ui.vocabMode === "spell") {
       setTimeout(focusSpell, 30);
+    }
+    if (route.name === "vocab" && ui.vocabMode === "dictation") {
+      setTimeout(focusDictation, 30);
     }
   }
 
@@ -3547,6 +3637,7 @@
         ui.cardSession = { known: 0, fuzzy: 0, unknown: 0, graded: 0 };
         ui.spell = null;
         ui.listen = null;
+        ui.dictation = null;
         rerender();
         break;
       }
@@ -3558,10 +3649,13 @@
         ui.cardSession = { known: 0, fuzzy: 0, unknown: 0, graded: 0 };
         ui.spell = null;
         ui.listen = null;
+        ui.dictation = null;
         if (mode === "spell") buildSpell();
         if (mode === "listen") buildListen();
+        if (mode === "dictation") buildDictation();
         render();
         if (mode === "listen" && ui.listen && ui.listen.items[0]) speak(ui.listen.items[0].word.w);
+        if (mode === "dictation" && ui.dictation && ui.dictation.items[0]) speak(ui.dictation.items[0].w);
         break;
       }
       case "load-more": {
@@ -3698,6 +3792,49 @@
         buildListen();
         rerender();
         if (ui.listen.items[0]) speak(ui.listen.items[0].word.w);
+        break;
+      case "dictate-play": {
+        const dt = ui.dictation;
+        if (dt && dt.items[dt.i]) speak(dt.items[dt.i].w);
+        break;
+      }
+      case "dictate-check": {
+        const dt = ui.dictation;
+        if (!dt || dt.checked || dt.i >= dt.items.length) break;
+        const w = dt.items[dt.i];
+        const given = String(dt.value || "").trim().toLowerCase();
+        const expect = String(w.w || "").trim().toLowerCase();
+        dt.checked = true;
+        dt.ok = given === expect;
+        if (dt.ok) dt.score++;
+        else setWordStatus(w.w, "fuzzy");
+        rerender();
+        break;
+      }
+      case "dictate-reveal": {
+        const dt = ui.dictation;
+        if (!dt || dt.checked || dt.i >= dt.items.length) break;
+        dt.checked = true;
+        dt.ok = false;
+        setWordStatus(dt.items[dt.i].w, "fuzzy");
+        rerender();
+        break;
+      }
+      case "dictate-next": {
+        const dt = ui.dictation;
+        if (!dt) break;
+        dt.i++;
+        dt.value = "";
+        dt.checked = false;
+        dt.ok = false;
+        rerender();
+        if (dt.i < dt.items.length) speak(dt.items[dt.i].w);
+        break;
+      }
+      case "dictate-restart":
+        buildDictation();
+        rerender();
+        if (ui.dictation.items[0]) speak(ui.dictation.items[0].w);
         break;
       case "sentence-level":
         ui.sentenceLevel = data.level;
@@ -4326,6 +4463,11 @@
         return;
       }
 
+      if (t.id === "dictateInput") {
+        if (ui.dictation) ui.dictation.value = t.value;
+        return;
+      }
+
       if (t.hasAttribute("data-trans-input")) {
         const key = t.getAttribute("data-trans-input");
         state.translations[key] = t.value;
@@ -4424,6 +4566,20 @@
         e.preventDefault();
         if (ui.spell && ui.spell.checked) spellNext();
         else spellCheck(false);
+        return;
+      }
+
+      if (route.name === "vocab" && ui.vocabMode === "dictation" && e.key === "Enter" && document.activeElement && document.activeElement.id === "dictateInput") {
+        e.preventDefault();
+        const dt = ui.dictation;
+        if (!dt) return;
+        if (dt.checked) {
+          const nb = document.querySelector('[data-action="dictate-next"]');
+          if (nb) nb.click();
+        } else {
+          const cb = document.querySelector('[data-action="dictate-check"]');
+          if (cb) cb.click();
+        }
         return;
       }
 
