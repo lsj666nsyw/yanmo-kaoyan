@@ -178,13 +178,14 @@
   let nativeVoiceList = [];
   let builtinTtsReady = false;
   let builtinTtsFailed = false;
+  let ttsDiagActive = false;
 
   function refreshNativeVoices() {
     if (!("speechSynthesis" in window)) { nativeVoiceList = []; return; }
     try { nativeVoiceList = window.speechSynthesis.getVoices() || []; } catch (err) { nativeVoiceList = []; }
-    // 设置页开着且语音列表后到时，重渲染让「当前将使用」的提示跟上
+    // 设置页开着且语音列表后到时，重渲染让「当前将使用」的提示跟上（自检进行中不打断）
     try {
-      if (nativeVoiceList.length && typeof rerender === "function" && document.querySelector("#ttsVoiceSelect")) rerender();
+      if (nativeVoiceList.length && !ttsDiagActive && typeof rerender === "function" && document.querySelector("#ttsVoiceSelect")) rerender();
     } catch (err) {}
   }
 
@@ -301,7 +302,95 @@
     const hint = cur
       ? "当前将使用：" + esc(cur.name) + (state && state.ttsVoice ? "（手动指定）" : "（自动选择）") + "。若没读出来会自动换下一个语音。"
       : "未检测到系统英文语音，当前会用离线内置语音朗读。";
-    return `<div class="field" style="margin-top:10px"><label for="ttsVoiceSelect">朗读声音</label><select id="ttsVoiceSelect">${opts.join("")}</select><p class="mini-note">${hint}</p></div>`;
+    const natural = list.filter(function (v) { return /natural|neural|online/i.test(v.name || ""); }).length;
+    const warn = !list.length
+      ? '<p class="mini-note">当前浏览器没有英文系统语音，朗读只能用离线机械音。用 Microsoft Edge 打开本页即可获得自然语音（这台电脑的 Edge 自带）。</p>'
+      : (!natural ? '<p class="mini-note">当前英文语音都是传统合成音，天生偏机械。微软自然音只在 Microsoft Edge 中可用——换 Edge 打开，读起来就是人声。</p>' : "");
+    return `<div class="field" style="margin-top:10px"><label for="ttsVoiceSelect">朗读声音</label><select id="ttsVoiceSelect">${opts.join("")}</select><p class="mini-note">${hint}</p>${warn}</div>`;
+  }
+
+  /* 语音自检：逐条试播候选语音,把浏览器/语音数量/出声耗时摊开给用户看 */
+  function ttsBrowserName() {
+    const ua = navigator.userAgent || "";
+    if (/Edg\//.test(ua)) return "Microsoft Edge";
+    if (/OPR\//.test(ua)) return "Opera";
+    if (/Firefox\//.test(ua)) return "Firefox";
+    if (/Chrome\//.test(ua)) return "Chrome 内核浏览器（Chrome / 360 / QQ 等）";
+    if (/Safari\//.test(ua)) return "Safari";
+    return "未知浏览器";
+  }
+
+  function runTtsDiag() {
+    const box = document.querySelector("#ttsDiag");
+    if (!box) return;
+    ttsDiagActive = true;
+    const paint = function (html) {
+      const b = document.querySelector("#ttsDiag");
+      if (b) b.innerHTML = html;
+    };
+    paint('<p class="mini-note">正在检测……最多几秒。</p>');
+    if (!("speechSynthesis" in window)) {
+      ttsDiagActive = false;
+      paint('<p class="mini-note">检测结果：此浏览器不支持系统语音合成，只能用离线机械音。请改用 Microsoft Edge 打开本页。</p>');
+      return;
+    }
+    const synth = window.speechSynthesis;
+    const list = englishVoices();
+    const naturalCount = list.filter(function (v) { return /natural|neural|online/i.test(v.name || ""); }).length;
+    const top = [];
+    for (let i = 0; i < list.length && top.length < 3; i++) {
+      if (!deadVoices.has(list[i].name)) top.push(list[i]);
+    }
+    const results = [];
+    const finish = function () {
+      const lines = [];
+      lines.push("浏览器：" + ttsBrowserName());
+      lines.push("英文系统语音：" + list.length + " 个（其中神经网络音 " + naturalCount + " 个）");
+      for (const r of results) {
+        lines.push((r.ok ? "✓ " : "✗ ") + r.name + (r.ok ? "，出声用时 " + (r.ms / 1000).toFixed(1) + " 秒" : "，" + r.note));
+      }
+      let verdict;
+      if (!list.length) {
+        verdict = "当前浏览器提供不了英文语音，朗读只能走离线机械音。用 Microsoft Edge 打开本页即可获得自然语音（这台电脑的 Edge 已自带）。";
+      } else if (!naturalCount) {
+        verdict = "你的英文语音都是传统合成音，天生偏机械。微软自然音只在 Microsoft Edge 中可用——换 Edge 打开，读起来就是人声。";
+      } else if (results.some(function (r) { return r.ok; })) {
+        verdict = "神经网络音能正常出声。若刚才听到的仍是机械音，请把上方「朗读方式」切回「自动」，再点「试听一句」。";
+      } else {
+        verdict = "检测到神经网络音但都没能出声，多半受网络或系统开关限制：Windows 设置 → 隐私和安全性 → 语音 → 打开「在线语音识别」，或改用 Microsoft Edge 重开本页。";
+      }
+      lines.push(verdict);
+      ttsDiagActive = false;
+      paint(lines.map(function (t) { return '<p class="mini-note">' + esc(t) + "</p>"; }).join(""));
+    };
+    const probeOne = function (i) {
+      if (i >= top.length) { finish(); return; }
+      const v = top[i];
+      let done = false;
+      const t0 = Date.now();
+      const end = function (ok, note) {
+        if (done) return;
+        done = true;
+        clearTimeout(to);
+        try { synth.cancel(); } catch (err) {}
+        results.push({ name: v.name, ok: ok, ms: Date.now() - t0, note: note || "" });
+        setTimeout(function () { probeOne(i + 1); }, 250);
+      };
+      const to = setTimeout(function () { end(false, "8 秒内没出声"); }, 8000);
+      try {
+        const u = new SpeechSynthesisUtterance("Hello, this is a test.");
+        u.voice = v;
+        u.lang = v.lang || "en-US";
+        u.rate = 1;
+        u.volume = 0.05;
+        u.onstart = function () { end(true, ""); };
+        u.onerror = function (e) { end(false, (e && e.error) || "报错"); };
+        synth.speak(u);
+      } catch (err) {
+        end(false, "调用异常");
+      }
+    };
+    probeOne(0);
   }
 
   function initBuiltinTts() {
@@ -345,28 +434,54 @@
       if (meSpeak.stop) meSpeak.stop();
       ttsMarkSpeaking(true);
       builtinActive = true;
-      meSpeak.speak(text, { speed: 150, amplitude: 100, wordgap: 25 }, function (ok) {
-        builtinActive = false;
-        ttsMarkSpeaking(false);
-        if (!ok) toast("发音失败，请再点一次");
-      });
+      // 分小段链播：一次性合成整篇会先卡住界面再开口；小段生成快、句间也顺
+      const parts = speechChunks(text, 240);
+      let i = 0;
+      const playNext = function () {
+        if (i >= parts.length) {
+          builtinActive = false;
+          ttsMarkSpeaking(false);
+          return;
+        }
+        const part = parts[i++];
+        let advanced = false;
+        const step = function () {
+          if (advanced) return;
+          advanced = true;
+          playNext();
+        };
+        // 回调之外的兜底：个别环境不回调播放完成，用估算时长接力，避免只读第一段
+        const guard = setTimeout(step, Math.max(1800, Math.round(part.length * 85) + 900));
+        meSpeak.speak(part, { speed: 150, amplitude: 100, wordgap: 10 }, function (ok) {
+          clearTimeout(guard);
+          if (ok) { step(); return; }
+          builtinActive = false;
+          ttsMarkSpeaking(false);
+          toast("发音失败，请再点一次");
+        });
+      };
+      playNext();
       return true;
     } catch (err) {
+      builtinActive = false;
+      ttsMarkSpeaking(false);
       toast("发音失败：" + (err.message || "未知错误"));
       return false;
     }
   }
 
-  // 长文本按句切分后依次入队播放，避免单条超长语音开头延迟大、中途卡顿
-  function speechChunks(text) {
-    if (text.length <= 200) return [text];
+  // 长文本按句切分后依次入队播放，避免单条超长语音开头延迟大、中途卡顿。
+  // 在线神经网络音分块过大/过碎都会在衔接处露缝，默认 480 字符；离线合成音用 240。
+  function speechChunks(text, limit) {
+    limit = limit || 480;
+    if (text.length <= limit) return [text];
     const parts = [];
     let buf = "";
     const segs = text.split(/(?<=[.!?;:])\s+/);
     for (const s of segs) {
-      if (buf && (buf.length + s.length + 1) > 200) { parts.push(buf); buf = s; }
+      if (buf && (buf.length + s.length + 1) > limit) { parts.push(buf); buf = s; }
       else buf = buf ? buf + " " + s : s;
-      while (buf.length > 380) { parts.push(buf.slice(0, 380)); buf = buf.slice(380); }
+      while (buf.length > limit + 160) { parts.push(buf.slice(0, limit + 160)); buf = buf.slice(limit + 160); }
     }
     if (buf) parts.push(buf);
     return parts;
@@ -424,7 +539,7 @@
         ttsMarkSpeaking(false);
         if (!nativeFailNoted) {
           nativeFailNoted = true;
-          toast("系统语音都没读出来，先用离线语音朗读（可在设置里换声音）");
+          toast("系统语音没能读出声，暂用离线机械音。想要自然人声：用 Microsoft Edge 打开本页");
         }
         speakBuiltin(text);
         return;
@@ -3015,6 +3130,8 @@
             </div>
             <p class="mini-note">自动：优先系统英文语音，联网时选中的神经网络音（Aria/Jenny 等）最自然；浏览器没有英文语音时改用内置离线语音。改语速或换声音后会自动试读一句。</p>
             <button class="text-link" data-action="test-tts">试听一句</button>
+            <button class="text-link" data-action="tts-diag">语音自检</button>
+            <div id="ttsDiag"></div>
           </div>
           <div class="field">
             <label>干扰项归因</label>
@@ -3329,6 +3446,9 @@
         speak("Reading is not a race. Slow down, and the argument will become clear.");
         break;
       }
+      case "tts-diag":
+        runTtsDiag();
+        break;
       case "set-rate": {
         if (["slow", "normal", "fast"].indexOf(data.rate) !== -1) {
           state.ttsRate = data.rate;
