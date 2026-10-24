@@ -1345,7 +1345,7 @@
     sentenceOpened: {},
     transTab: "sentence",
     transPassage: 1,
-    meTab: "notebook",
+    meTab: "summary",
     redo: {},
     reviewed: {},
     searchTimer: null,
@@ -4934,7 +4934,7 @@
 
   function pageMe() {
     const route = getRoute();
-    if (route.param === "notebook" || route.param === "mistakes" || route.param === "records") {
+    if (route.param === "summary" || route.param === "notebook" || route.param === "mistakes" || route.param === "records") {
       ui.meTab = route.param;
     }
     const tab = ui.meTab;
@@ -4948,12 +4948,13 @@
       </div>
 
       <div class="subnav">
+        <button class="${tab === "summary" ? "on" : ""}" data-action="me-tab" data-tab="summary">学习记录</button>
         <button class="${tab === "notebook" ? "on" : ""}" data-action="me-tab" data-tab="notebook">生词本</button>
         <button class="${tab === "mistakes" ? "on" : ""}" data-action="me-tab" data-tab="mistakes">错题本</button>
         <button class="${tab === "records" ? "on" : ""}" data-action="me-tab" data-tab="records">记录与设置</button>
       </div>
 
-      ${tab === "notebook" ? meNotebook() : (tab === "mistakes" ? meMistakes() : meRecords())}`;
+      ${tab === "notebook" ? meNotebook() : (tab === "mistakes" ? meMistakes() : (tab === "summary" ? meSummary() : meRecords()))}`;
   }
 
   function meNotebook() {
@@ -5168,6 +5169,141 @@
           </div>
         </aside>
       </div>`;
+  }
+
+  /* ------------------------------------------------------------------
+     me summary（学习记录汇总）
+  ------------------------------------------------------------------ */
+
+  function meSummary() {
+    const day = state.days[todayKey()];
+    const todayTasks = day && Array.isArray(day.tasks) ? day.tasks.filter(Boolean).length : 0;
+    const activeDays = Object.keys(state.days).filter(function (k) { return isActiveDay(state.days[k]); }).length;
+
+    const week = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = addDays(new Date(), -i);
+      const key = ymd(d);
+      const rec = state.days[key];
+      const on = !!(rec && isActiveDay(rec));
+      const tasks = rec && Array.isArray(rec.tasks) ? rec.tasks.filter(Boolean).length : 0;
+      week.push(`<button class="me-week-day ${on ? "on" : ""}" title="${key} · 任务 ${tasks} / 5"><i></i><span>${key.slice(key.length - 2)}</span></button>`);
+    }
+
+    const known = knownCount();
+    const fuzzy = Object.keys(state.words).filter(function (w) { return state.words[w] === "fuzzy"; }).length;
+    const due = dueWords().length;
+
+    const readRecs = Object.keys(state.reading).map(function (k) { return state.reading[k]; }).filter(Boolean);
+    const readDone = readRecs.filter(function (r) { return r.submitted; });
+    const readRight = readDone.reduce(function (s, r) { return s + (Number(r.score) || 0); }, 0);
+    const readPct = readDone.length ? Math.round(readRight / (readDone.length * 5) * 100) : 0;
+
+    const practiceTotal = (state.clozes || []).length + (state.sevens || []).length + (state.orders || []).length + (state.headings || []).length;
+    const practiceDone = [state.clozes, state.sevens, state.orders, state.headings].reduce(function (s, arr) {
+      return s + (Array.isArray(arr) ? arr.filter(function (x) { return x && x.submitted; }).length : 0);
+    }, 0);
+
+    const one = function (src, denom) {
+      const arr = Array.isArray(src) ? src : [];
+      const doneN = arr.filter(function (x) { return x && x.submitted; }).length;
+      const right = arr.reduce(function (s, x) { return s + (x && x.submitted ? Number(x.score) || 0 : 0); }, 0);
+      return { done: doneN, right: right, denom: denom };
+    };
+    const practiceRows = [
+      ["完形填空", one(state.clozes, 20)],
+      ["七选五", one(state.sevens, 5)],
+      ["排序", one(state.orders, 5)],
+      ["小标题", one(state.headings, 5)]
+    ].map(function (row) {
+      const st = row[1];
+      return `<tr><td>${row[0]}</td><td class="num">${st.done} 篇</td><td class="num">${st.done ? st.right + " / " + st.done * st.denom : "—"}</td></tr>`;
+    }).join("");
+
+    const transCount = Object.keys(state.translations).length;
+    const draftCount = Object.keys(state.drafts).length;
+
+    const exams = state.exams || [];
+    const doneExams = exams.filter(function (r) { return r.self && r.self.done; });
+    const avgScore = doneExams.length ? (doneExams.reduce(function (s, r) { return s + (Number(r.total) || 0); }, 0) / doneExams.length) : 0;
+    const bestScore = doneExams.length ? doneExams.reduce(function (s, r) { return Math.max(s, Number(r.total) || 0); }, 0) : 0;
+    const passN = doneExams.filter(function (r) { return Number(r.total) >= 60; }).length;
+
+    const mistakeTypes = ["阅读", "完形", "七选五", "排序", "小标题"].map(function (t) {
+      const n = state.mistakes.filter(function (m) { return m.type === t; }).length;
+      return n ? t + " " + n + " 道" : "";
+    }).filter(Boolean).join(" · ");
+
+    const smooth = function (n, d) { return d ? (Math.round(n / d * 10) / 10) : 0; };
+
+    return `
+      <section class="me-summary-block">
+        <div class="section-head"><h2>打卡与节奏</h2><span class="section-note">今天 ${todayTasks} / 5 项任务 · 最近 7 天</span></div>
+        <div class="sum-cards">
+          <div class="sum-card"><p class="k">连续打卡</p><p class="v">${streakDays()}<small>天</small></p></div>
+          <div class="sum-card"><p class="k">累计学习</p><p class="v">${activeDays}<small>天</small></p></div>
+          <div class="sum-card"><p class="k">累计专注</p><p class="v">${totalMinutes()}<small>分钟</small></p></div>
+          <div class="sum-card"><p class="k">练习完成</p><p class="v">${practiceDone}<small> / ${practiceTotal} 篇</small></p></div>
+        </div>
+        <div class="me-week">${week.join("")}</div>
+        <p class="mini-note">圆点为有学习痕迹的日期；数字为当天完成的清单任务数。学习时长不含中途暂停。</p>
+      </section>
+
+      <div class="me-summary-grid">
+        <section>
+          <div class="section-head"><h2>词汇</h2><span class="section-note">共 ${ALL_WORDS.length} 词 · 今日待复习 ${due} 词</span></div>
+          <table class="data history-table">
+            <tbody>
+              <tr><td>已掌握（认识）</td><td class="num"><b>${known}</b> 词</td></tr>
+              <tr><td>待巩固（模糊）</td><td class="num"><b>${fuzzy}</b> 词</td></tr>
+              <tr><td>生词本</td><td class="num"><b>${state.notebook.length}</b> 词</td></tr>
+              <tr><td>今日到期</td><td class="num"><b>${due}</b> 词 <a class="text-link" href="#/vocab">去复习 →</a></td></tr>
+            </tbody>
+          </table>
+          <div class="section-head" style="margin-top:26px"><h2>翻译与写作</h2></div>
+          <table class="data history-table">
+            <tbody>
+              <tr><td>翻译练习草稿</td><td class="num"><b>${transCount}</b> 篇</td></tr>
+              <tr><td>写作草稿</td><td class="num"><b>${draftCount}</b> 篇</td></tr>
+            </tbody>
+          </table>
+          <div class="section-head" style="margin-top:26px"><h2>错题分布</h2><span class="section-note">共 ${state.mistakes.length} 道</span></div>
+          <p class="sum-line">${mistakeTypes || "还没有错题。练习时答错的题会自动进入错题本。"}</p>
+        </section>
+
+        <section>
+          <div class="section-head"><h2>阅读</h2><span class="section-note">${readDone.length} 篇已提交</span></div>
+          <table class="data history-table">
+            <tbody>
+              <tr><td>提交篇数</td><td class="num"><b>${readDone.length}</b> / ${Object.keys(state.reading).length} 练过</td></tr>
+              <tr><td>平均正确</td><td class="num"><b>${smooth(readRight, readDone.length)}</b> / 5 题 · ${readPct}%</td></tr>
+            </tbody>
+          </table>
+          <div class="section-head" style="margin-top:26px"><h2>完形与新题型</h2></div>
+          <div class="table-wrap"><table class="data history-table">
+            <thead><tr><th>题型</th><th>完成</th><th>累计答对 / 题量</th></tr></thead>
+            <tbody>${practiceRows}</tbody>
+          </table></div>
+          <div class="section-head" style="margin-top:26px"><h2>全真模考</h2><span class="section-note">共 ${exams.length} 次 · 已自评 ${doneExams.length}</span></div>
+          <table class="data history-table">
+            <tbody>
+              <tr><td>平均总分</td><td class="num"><b>${doneExams.length ? examScoreText(avgScore) : "—"}</b> / 100</td></tr>
+              <tr><td>最佳总分</td><td class="num"><b>${doneExams.length ? examScoreText(bestScore) : "—"}</b> / 100</td></tr>
+              <tr><td>过线次数（≥60）</td><td class="num"><b>${passN}</b> 次</td></tr>
+            </tbody>
+          </table>
+          <a class="text-link" href="#/exam">查看全部模考记录 →</a>
+        </section>
+      </div>
+
+      <section class="sum-backup">
+        <div class="section-head"><h2>记录备份与恢复</h2><span class="section-note">数据只保存在本机浏览器</span></div>
+        <p class="sum-line">「导出记录」会生成一个 JSON 备份文件；换设备或清除浏览器后，用「导入记录」恢复全部进度（背词、错题、模考、打卡）。建议每周导出一次。</p>
+        <div class="settings-actions">
+          <button class="btn btn-sm btn-quiet" data-action="export-data">导出记录</button>
+          <button class="btn btn-sm btn-quiet" data-action="import-data">导入记录</button>
+        </div>
+      </section>`;
   }
 
   /* ------------------------------------------------------------------
@@ -6325,7 +6461,11 @@
         break;
       }
       case "export-data": {
-        const payload = Object.assign({}, state, { exportedAt: new Date().toISOString() });
+        const payload = Object.assign({}, state, {
+          app: "研墨 · 考研英语",
+          format: "yanmo-kaoyan-backup-v1",
+          exportedAt: new Date().toISOString()
+        });
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -6582,7 +6722,14 @@
             closeDrawer();
             save();
             render();
-            toast("记录已导入");
+            toast("记录已导入" + (function (n) {
+              const words = Object.keys(next.words || {}).length + (next.notebook || []).length;
+              const exams = Array.isArray(next.exams) ? next.exams.length : 0;
+              const bits = [];
+              if (words) bits.push(words + " 个词标记");
+              if (exams) bits.push(exams + " 次模考");
+              return n && bits.length ? "（" + bits.join("，") + "）" : "";
+            })(1));
           } catch (err) {
             toast("导入失败：不是有效的记录文件");
           }
