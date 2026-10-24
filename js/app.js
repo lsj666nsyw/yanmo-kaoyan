@@ -181,6 +181,14 @@
   let builtinTtsFailed = false;
   let ttsDiagActive = false;
 
+  // 平台判定：手机/平板的朗读链路与桌面不同，单独做稳定性处理。
+  const IS_TOUCH = (typeof window !== "undefined") && (("ontouchstart" in window) || (navigator.maxTouchPoints || 0) > 0);
+  const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent || "")
+    || (navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1);
+  const IS_MOBILE = IS_TOUCH || /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent || "");
+  // 每次系统语音朗读的令牌：切换文本/停止后，旧回调与旧定时器全部作废。
+  let nativeRunToken = 0;
+
   function refreshNativeVoices() {
     if (!("speechSynthesis" in window)) { nativeVoiceList = []; return; }
     try { nativeVoiceList = window.speechSynthesis.getVoices() || []; } catch (err) { nativeVoiceList = []; }
@@ -196,6 +204,12 @@
 
   function warmNativeVoice() {
     if (warmedVoice || !("speechSynthesis" in window)) return;
+    // 移动端浏览器要求语音必须在用户手势里启动；无手势预热会被静默拦截，
+    // 甚至把引擎卡在 pending，导致第一次点朗读不出声。手机直接跳过预热。
+    if (IS_MOBILE) return;
+    try {
+      if (navigator.userActivation && navigator.userActivation.hasBeenActive === false) return;
+    } catch (err) {}
     const synth = window.speechSynthesis;
     try { if (synth.speaking || synth.pending) return; } catch (err) { return; }
     const v = resolveVoice();
@@ -331,7 +345,7 @@
       if (a.currentTime > 0 && !a.paused) return;   // 已经在放，不打扰
       try { a.pause(); } catch (err) {}
       finish(false);
-    }, 4200);
+    }, IS_MOBILE ? 2800 : 4200);
     try {
       a.pause();
       a.preload = "auto";
@@ -487,7 +501,7 @@
           if (a.currentTime > 0.05) return;
           if (a.readyState >= 3 && !a.paused) return;
           fail(false);
-        }, idx === 0 ? 7000 : 9000);
+        }, idx === 0 ? (IS_MOBILE ? 4000 : 7000) : (IS_MOBILE ? 6000 : 9000));
         a.src = baiduTtsUrl(chunks[idx]);
         const pr = a.play();
         if (pr && pr.catch) pr.catch(function (err) {
@@ -529,6 +543,12 @@
   /* 语音自检：逐条试播候选语音,把浏览器/语音数量/出声耗时摊开给用户看 */
   function ttsBrowserName() {
     const ua = navigator.userAgent || "";
+    if (/MicroMessenger/i.test(ua)) return "微信内置浏览器";
+    if (/MQQBrowser|QQBrowser/i.test(ua)) return "QQ 浏览器";
+    if (/HuaweiBrowser|HarmonyOS|HBPC/i.test(ua)) return "华为浏览器";
+    if (/MiuiBrowser/i.test(ua)) return "小米浏览器";
+    if (/VivoBrowser/i.test(ua)) return "vivo 浏览器";
+    if (/HeyTapBrowser|OppoBrowser/i.test(ua)) return "OPPO 浏览器";
     if (/Edg\//.test(ua)) return "Microsoft Edge";
     if (/OPR\//.test(ua)) return "Opera";
     if (/Firefox\//.test(ua)) return "Firefox";
@@ -562,6 +582,7 @@
     const finish = function () {
       const lines = [];
       lines.push("浏览器：" + ttsBrowserName());
+      lines.push("设备：" + (IS_MOBILE ? "移动端" : "桌面") + (IS_IOS ? "（iOS）" : "") + " · 触屏 " + (IS_TOUCH ? "是" : "否"));
       lines.push("英文系统语音：" + list.length + " 个（其中神经网络音 " + naturalCount + " 个）");
       for (const r of results) {
         lines.push((r.ok ? "✓ " : "✗ ") + r.name + (r.ok ? "，出声用时 " + (r.ms / 1000).toFixed(1) + " 秒" : "，" + r.note));
@@ -691,16 +712,33 @@
   // 在线神经网络音分块过大/过碎都会在衔接处露缝，默认 480 字符；离线合成音用 240。
   function speechChunks(text, limit) {
     limit = limit || 480;
-    if (text.length <= limit) return [text];
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    if (!clean) return [];
+    if (clean.length <= limit) return [clean];
     const parts = [];
     let buf = "";
-    const segs = text.split(/(?<=[.!?;:])\s+/);
-    for (const s of segs) {
-      if (buf && (buf.length + s.length + 1) > limit) { parts.push(buf); buf = s; }
-      else buf = buf ? buf + " " + s : s;
-      while (buf.length > limit + 160) { parts.push(buf.slice(0, limit + 160)); buf = buf.slice(limit + 160); }
+    const flush = function () {
+      const t = buf.trim();
+      if (t) parts.push(t);
+      buf = "";
+    };
+    const segs = clean.split(/(?<=[.!?;:])\s+/);
+    for (const raw of segs) {
+      let s = raw.trim();
+      if (!s) continue;
+      // 单句超长时按空格硬切，保证每一段都不超过上限（移动端长 utterance 会被引擎截断）
+      while (s.length > limit) {
+        flush();
+        let cut = s.lastIndexOf(" ", limit);
+        if (cut < Math.floor(limit * 0.55)) cut = limit;
+        parts.push(s.slice(0, cut).trim());
+        s = s.slice(cut).trim();
+      }
+      if (!s) continue;
+      if (buf && buf.length + 1 + s.length > limit) flush();
+      buf = buf ? buf + " " + s : s;
     }
-    if (buf) parts.push(buf);
+    flush();
     return parts;
   }
 
@@ -730,6 +768,7 @@
   function ttsStop() {
     try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (err) {}
     try { if (window.meSpeak && meSpeak.stop) meSpeak.stop(); } catch (err) {}
+    nativeRunToken++;
     onlineToken++;
     onlineActive = false;
     if (onlineAudio) { try { onlineAudio.pause(); } catch (err) {} }
@@ -739,117 +778,196 @@
     ttsMarkSpeaking(false);
   }
 
+  /* 切后台/锁屏时清掉朗读：移动端语音引擎在后台会挂起，
+     回来后残留的 speaking 状态会让下一次朗读哑掉。 */
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) ttsStop();
+  });
+  window.addEventListener("pagehide", function () { ttsStop(); }, false);
+
+  /* 首次触摸：唤醒系统语音列表，并预加载离线语音。
+     移动端系统语音列表常常首帧为空；离线音走 Web Audio，也需要手势解锁。 */
+  let ttsGestureReady = false;
+  function ttsFirstGesture() {
+    if (ttsGestureReady) return;
+    ttsGestureReady = true;
+    try { refreshNativeVoices(); } catch (err) {}
+    try {
+      if ("speechSynthesis" in window && window.speechSynthesis.paused) window.speechSynthesis.resume();
+    } catch (err) {}
+    try { if (IS_MOBILE) initBuiltinTts(); } catch (err) {}
+  }
+  document.addEventListener("touchstart", ttsFirstGesture, { passive: true });
+  document.addEventListener("pointerdown", ttsFirstGesture, { passive: true });
+  document.addEventListener("keydown", ttsFirstGesture);
+
   function speakNative(text) {
     if (!("speechSynthesis" in window)) return false;
+    try { refreshNativeVoices(); } catch (err) {}
     const candidates = voiceCandidates();
     if (!candidates.length) return false;
     const synth = window.speechSynthesis;
     let busy = false;
     try { busy = !!(synth.speaking || synth.pending); } catch (err) {}
-    if (busy) { try { synth.cancel(); } catch (err) {} }
     if (speakDelay) { clearTimeout(speakDelay); speakDelay = null; }
     if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
-    let idx = 0;
 
-    function markDead(voice) {
-      try { deadVoices.add(voice.name || voice.voiceURI || "?"); } catch (err) {}
-    }
+    const runId = ++nativeRunToken;
+    // 移动端单段更短：iOS 对超长 utterance 有中途截断的老问题，短段串播更稳
+    const chunks = speechChunks(text, IS_MOBILE ? 200 : 480);
+    let voiceIdx = 0;
+    let chunkIdx = 0;
 
-    function advance() {
-      if (idx >= candidates.length) {
-        ttsMarkSpeaking(false);
-        // 系统语音全军覆没：单词再试在线真人发音（同一条已试过的失败不再重复），最后才离线合成音
-        if (text !== onlineFailedText && speakOnline(text, function () { speakBuiltin(text); })) {
-          if (!nativeFailNoted) {
-            nativeFailNoted = true;
-            toast("系统语音没出声，单词改用在线真人发音");
-          }
-          return;
-        }
-        // 整句/整段：系统语音失败后先试在线人声，只把剩下的部分交出去
-        if (!isWordLike(text) && speakOnlineSentence(text, function (rest) { speakBuiltin(rest || text); })) {
-          if (!nativeFailNoted) {
-            nativeFailNoted = true;
-            toast("系统语音没出声，整句改用在线人声");
-          }
-          return;
-        }
+    const finish = function () {
+      if (runId !== nativeRunToken) return;
+      ttsMarkSpeaking(false);
+    };
+
+    // 所有候选系统语音都失败后的兜底层：单词在线真人音 / 整句在线人声 / 离线音
+    const fallback = function () {
+      if (runId !== nativeRunToken) return;
+      ttsMarkSpeaking(false);
+      if (text !== onlineFailedText && speakOnline(text, function () { speakBuiltin(text); })) {
         if (!nativeFailNoted) {
           nativeFailNoted = true;
-          toast("系统语音没能读出声，暂用离线机械音。想要自然人声：用 Microsoft Edge 打开本页");
+          toast("系统语音没出声，单词改用在线真人发音");
         }
-        speakBuiltin(text);
         return;
       }
-      attempt(candidates[idx], idx === 0);
-      idx++;
-    }
-
-    function attempt(voice, first) {
-      let began = false;
-      let settled = false;
-      const startAt = Date.now();
-      const engineAlive = function () {
-        try { return !!(synth.speaking || synth.pending); } catch (err) { return false; }
-      };
-      const failStep = function (note) {
-        if (settled) return;
-        settled = true;
-        if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
-        markDead(voice);
-        try { synth.cancel(); } catch (err) {}
-        if (speakDelay) clearTimeout(speakDelay);
-        // Windows 取消后立刻再开会静音，缓冲一拍再让下一个声音上场
-        speakDelay = setTimeout(advance, 80);
-        if (note && !nativeFailNoted) {
+      if (!isWordLike(text) && speakOnlineSentence(text, function (rest) { speakBuiltin(rest || text); })) {
+        if (!nativeFailNoted) {
           nativeFailNoted = true;
-          toast(note);
+          toast("系统语音没出声，整句改用在线人声");
         }
-      };
+        return;
+      }
+      if (!nativeFailNoted) {
+        nativeFailNoted = true;
+        toast(IS_MOBILE
+          ? "系统语音没能读出声，暂用离线机械音。想要自然人声：在系统设置里安装英文语音包，或改用 Edge 手机版打开"
+          : "系统语音没能读出声，暂用离线机械音。想要自然人声：用 Microsoft Edge 打开本页");
+      }
+      speakBuiltin(text);
+    };
+
+    const markDead = function (voice) {
+      try { deadVoices.add(voice.name || voice.voiceURI || "?"); } catch (err) {}
+    };
+
+    let speakChunk = null;
+
+    const failVoice = function (note) {
+      if (runId !== nativeRunToken) return;
+      if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
+      if (candidates[voiceIdx]) markDead(candidates[voiceIdx]);
+      try { synth.cancel(); } catch (err) {}
+      try { if (IS_IOS && synth.resume) synth.resume(); } catch (err) {}
+      voiceIdx++;
+      chunkIdx = 0;
+      if (voiceIdx >= candidates.length) { fallback(); return; }
+      if (note && !nativeFailNoted) { nativeFailNoted = true; toast(note); }
+      speakDelay = setTimeout(function () {
+        if (runId === nativeRunToken) speakChunk();
+      }, IS_MOBILE ? 60 : 80);
+    };
+
+    const finishChunk = function () {
+      if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
+      if (runId !== nativeRunToken) return;
+      chunkIdx++;
+      if (chunkIdx >= chunks.length) { finish(); return; }
+      // 一段一段排队，避免移动端引擎吞并或漏读长队列
+      speakDelay = setTimeout(function () {
+        if (runId === nativeRunToken) speakChunk();
+      }, IS_MOBILE ? 30 : 0);
+    };
+
+    speakChunk = function () {
+      if (runId !== nativeRunToken) return;
+      if (chunkIdx >= chunks.length) { finish(); return; }
+      const part = chunks[chunkIdx];
+      const voice = candidates[voiceIdx];
+      let settled = false;
+      let started = false;
+      const startAt = Date.now();
+      let u;
       try {
-        const chunks = speechChunks(text);
-        for (let i = 0; i < chunks.length; i++) {
-          const u = new SpeechSynthesisUtterance(chunks[i]);
-          u.voice = voice;
-          u.lang = voice.lang || "en-US";
-          u.rate = rateBase(chunks[i].length);
+        u = new SpeechSynthesisUtterance(part);
+        u.voice = voice;
+        u.lang = voice.lang || "en-US";
+        u.rate = rateBase(part.length);
+        u.pitch = 1;
+        u.volume = 1;
+      } catch (err) {
+        // 个别浏览器会拒绝“非本引擎创建”的 voice 对象；退回只设语言再试一次
+        try {
+          u = new SpeechSynthesisUtterance(part);
+          u.lang = (voice && voice.lang) || "en-US";
+          u.rate = rateBase(part.length);
           u.pitch = 1;
           u.volume = 1;
-          if (i === 0) {
-            u.onstart = function () {
-              began = true;
-              if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
-            };
-            u.onerror = function () { failStep("当前朗读声音没读出来，已换其他系统语音"); };
-          } else if (i === chunks.length - 1) {
-            u.onend = function () { ttsMarkSpeaking(false); };
-            u.onerror = function () { failStep("当前朗读声音没读出来，已换其他系统语音"); };
-          }
-          synth.speak(u);
-        }
-        /* 看门狗：在线神经网络音冷启动要连微软语音服务，实测首帧可能要 2~4 秒，
-           引擎还显示“正在合成”就不能定死罪，只有引擎自己放弃或累计挂满 10 秒才换下家 */
-        const watchTick = function () {
-          if (settled || began) return;
-          const waited = Date.now() - startAt;
-          if (engineAlive() && waited < 10000) {
-            ttsWatch = setTimeout(watchTick, 2600);
-            return;
-          }
-          failStep("当前朗读声音没能读出声，已换其他系统语音");
-        };
-        if (ttsWatch) clearTimeout(ttsWatch);
-        ttsWatch = setTimeout(watchTick, first ? 4800 : 3600);
-        ttsMarkSpeaking(true);
-      } catch (err) {
-        failStep("");
+        } catch (err2) { failVoice(""); return; }
       }
-    }
 
-    // Windows 在「取消后立即开始」时大概率静音/迟滞，中断重播延迟一拍；
-    // 空闲时同步播（iOS Safari 要求 speak 与用户手势同帧）。
-    if (busy) speakDelay = setTimeout(advance, 80);
-    else advance();
+      const ok = function () {
+        if (settled) return;
+        settled = true;
+        finishChunk();
+      };
+      const bad = function (note) {
+        if (settled) return;
+        settled = true;
+        failVoice(note || "");
+      };
+
+      u.onstart = function () {
+        if (settled) return;
+        started = true;
+        if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
+        // 开始后仍看守：个别移动端引擎会中途停住且不回调 onend
+        const stallCheck = function () {
+          if (settled || runId !== nativeRunToken) return;
+          let alive = false;
+          try { alive = !!(synth.speaking || synth.pending); } catch (err) {}
+          if (alive) { ttsWatch = setTimeout(stallCheck, 4000); return; }
+          ok();
+        };
+        ttsWatch = setTimeout(stallCheck, Math.max(6000, Math.round(part.length * 95)));
+      };
+      u.onend = function () { ok(); };
+      u.onerror = function () { bad("当前朗读声音没读出来，已换其他系统语音"); };
+
+      try { synth.speak(u); } catch (err) { bad(""); return; }
+      ttsMarkSpeaking(true);
+      // 启动看门狗：冷启动/低端机慢一些；引擎还在合成时不断续期
+      const firstWait = IS_MOBILE ? 7000 : 4800;
+      const limit = IS_MOBILE ? 15000 : 10000;
+      const watchTick = function () {
+        if (settled || runId !== nativeRunToken) return;
+        if (started) return;
+        let alive = false;
+        try { alive = !!(synth.speaking || synth.pending); } catch (err) {}
+        if (alive && Date.now() - startAt < limit) {
+          ttsWatch = setTimeout(watchTick, 2500);
+          return;
+        }
+        bad(IS_MOBILE ? "系统语音启动超时，已换其他语音" : "当前朗读声音没能读出声，已换其他系统语音");
+      };
+      if (ttsWatch) clearTimeout(ttsWatch);
+      ttsWatch = setTimeout(watchTick, firstWait);
+    };
+
+    // 先清理上一段；iOS 在 cancel 后立刻 speak 容易丢音，恢复一次引擎并留一小拍
+    if (busy) {
+      try { synth.cancel(); if (synth.resume) synth.resume(); } catch (err) {}
+    }
+    const begin = function () {
+      if (runId !== nativeRunToken) return;
+      chunkIdx = 0;
+      speakChunk();
+    };
+    if (busy) speakDelay = setTimeout(begin, IS_MOBILE ? 60 : 80);
+    else begin();
     return true;
   }
 
@@ -872,6 +990,7 @@
     if (onlineAudio) { try { onlineAudio.pause(); } catch (err) {} onlineAudio = null; }
     onlineToken++;
     onlineActive = false;
+    try { refreshNativeVoices(); } catch (err) {}
     const mode = (state && TTS_MODES.indexOf(state.ttsMode) !== -1) ? state.ttsMode : "auto";
     const nativeThenBuiltin = function (rest) {
       const remain = (typeof rest === "string" && rest) ? rest : text;
@@ -882,6 +1001,12 @@
       return;
     }
     if (mode === "native") {
+      nativeThenBuiltin();
+      return;
+    }
+    // 移动端：系统语音最稳，有英文语音就直接用；只有完全没有系统语音时
+    // 才先走在线人声，避免移动网络下每次点读都先等在线首包。
+    if (IS_MOBILE && voiceCandidates().length) {
       nativeThenBuiltin();
       return;
     }
