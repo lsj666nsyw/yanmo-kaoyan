@@ -361,6 +361,7 @@
   ------------------------------------------------------------------ */
   let onlineTextDead = false;
   let onlineTextDeadAt = 0;
+  let onlineTextNoted = false;
 
   function baiduTtsUrl(text) {
     return "https://fanyi.baidu.com/gettts?lan=en&text=" + encodeURIComponent(text) + "&spd=3&source=web";
@@ -422,7 +423,14 @@
       onlineActive = false;
       try { if (onlineAudio) onlineAudio.pause(); } catch (err) {}
       ttsMarkSpeaking(false);
-      if (idx === 0 && !blocked) { onlineTextDead = true; onlineTextDeadAt = Date.now(); }
+      if (idx === 0 && !blocked) {
+        onlineTextDead = true;
+        onlineTextDeadAt = Date.now();
+        if (!onlineTextNoted) {
+          onlineTextNoted = true;
+          toast("在线人声暂时连不上，先用系统语音；稍后会自动重试");
+        }
+      }
       // 中途失败时只把剩下的部分交给系统语音，避免从头再读一遍
       const rest = idx === 0 ? "" : chunks.slice(idx).join(" ");
       try { onFail(rest); } catch (err) {}
@@ -472,12 +480,13 @@
         onlineActive = true;
         ttsMarkSpeaking(true);
         if (guard) clearTimeout(guard);
-        // 首块允许 6 秒（含网络与合成），后续块 8 秒；播放已开始就不再拦
+        // 首块允许 7 秒（含网络与合成），后续块 9 秒；已开始或已缓冲好就不再拦
         guard = setTimeout(function () {
           if (settled) return;
           if (a.currentTime > 0.05) return;
+          if (a.readyState >= 3 && !a.paused) return;
           fail(false);
-        }, idx === 0 ? 6000 : 8000);
+        }, idx === 0 ? 7000 : 9000);
         a.src = baiduTtsUrl(chunks[idx]);
         const pr = a.play();
         if (pr && pr.catch) pr.catch(function (err) {
