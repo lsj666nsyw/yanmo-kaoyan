@@ -172,8 +172,8 @@
     });
   }
 
-  /* 朗读：系统英文语音优先；没有英文语音或系统语音报错时，使用内置离线语音。
-     内置语音是 meSpeak（eSpeak 的 JS 移植），不联网，也不依赖 speechSynthesis。 */
+  /* 朗读分层：自然神经音 → 有道单词真人音 / 百度整句人声 → 系统普通音 → 离线合成音。
+     没有自然音的环境（360/Chrome/安卓常见）也能听到正常人声。 */
   const TTS_MODES = ["auto", "native", "builtin"];
   let nativeVoiceList = [];
   let builtinTtsReady = false;
@@ -352,6 +352,146 @@
     }
   }
 
+  /* ------------------------------------------------------------------
+     在线整句/整段真人声：百度翻译 TTS（无需密钥、国内直连、返回 mp3）。
+     单条上限约 600 字符，这里按句切成 160 字符以内，逐块播放并提前预取
+     下一块，句间几乎无缝；整页只探测一次，失败即回系统语音/离线音。
+     注意：百度会拒绝带站外 Referer 的请求，整页依赖 index.html 里的
+     <meta name="referrer" content="no-referrer">（单文件版同样保留）。
+  ------------------------------------------------------------------ */
+  let onlineTextDead = false;
+  let onlineTextDeadAt = 0;
+
+  function baiduTtsUrl(text) {
+    return "https://fanyi.baidu.com/gettts?lan=en&text=" + encodeURIComponent(text) + "&spd=3&source=web";
+  }
+
+  function onlineSplit(text, limit) {
+    limit = limit || 160;
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    if (!clean) return [];
+    const out = [];
+    let buf = "";
+    const flush = function () {
+      const t = buf.trim();
+      if (t) out.push(t);
+      buf = "";
+    };
+    const segs = clean.split(/(?<=[.!?;:])\s+/);
+    for (const raw of segs) {
+      let s = raw.trim();
+      if (!s) continue;
+      while (s.length > limit) {
+        flush();
+        let cut = s.lastIndexOf(" ", limit);
+        if (cut < Math.floor(limit * 0.55)) cut = limit;
+        out.push(s.slice(0, cut).trim());
+        s = s.slice(cut).trim();
+      }
+      if (!s) continue;
+      if (buf && buf.length + 1 + s.length > limit) flush();
+      buf = buf ? buf + " " + s : s;
+    }
+    flush();
+    return out;
+  }
+
+  function speakOnlineSentence(text, onFail) {
+    if (onlineTextDead && Date.now() - onlineTextDeadAt < 180000) return false;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+    onlineTextDead = false;
+    const chunks = onlineSplit(text, 160);
+    if (!chunks.length) return false;
+    const token = ++onlineToken;
+    const rate = state && state.ttsRate === "slow" ? 0.82 : (state && state.ttsRate === "fast" ? 1.16 : 1);
+    let idx = 0;
+    let settled = false;
+    let guard = null;
+    let prefetched = null;
+
+    function cleanUp() {
+      if (guard) { clearTimeout(guard); guard = null; }
+      if (prefetched) { try { prefetched.src = ""; } catch (err) {} prefetched = null; }
+    }
+
+    function fail(blocked) {
+      if (settled) return;
+      settled = true;
+      cleanUp();
+      if (token !== onlineToken) return;
+      onlineActive = false;
+      try { if (onlineAudio) onlineAudio.pause(); } catch (err) {}
+      ttsMarkSpeaking(false);
+      if (idx === 0 && !blocked) { onlineTextDead = true; onlineTextDeadAt = Date.now(); }
+      // 中途失败时只把剩下的部分交给系统语音，避免从头再读一遍
+      const rest = idx === 0 ? "" : chunks.slice(idx).join(" ");
+      try { onFail(rest); } catch (err) {}
+    }
+
+    function done() {
+      if (settled) return;
+      settled = true;
+      cleanUp();
+      if (token !== onlineToken) return;
+      onlineActive = false;
+      ttsMarkSpeaking(false);
+    }
+
+    function prefetchNext() {
+      if (idx + 1 >= chunks.length) return;
+      try {
+        const pf = new Audio();
+        pf.referrerPolicy = "no-referrer";
+        pf.preload = "auto";
+        pf.src = baiduTtsUrl(chunks[idx + 1]);
+        prefetched = pf;
+      } catch (err) {}
+    }
+
+    function playChunk() {
+      if (settled) return;
+      if (token !== onlineToken) { done(); return; }
+      if (idx >= chunks.length) { done(); return; }
+      let a;
+      try { a = new Audio(); } catch (err) { fail(); return; }
+      a.referrerPolicy = "no-referrer";
+      a.preload = "auto";
+      a.playbackRate = rate;
+      a.onplaying = function () {
+        if (guard) { clearTimeout(guard); guard = null; }
+      };
+      a.onended = function () {
+        if (settled || token !== onlineToken) return;
+        if (guard) { clearTimeout(guard); guard = null; }
+        idx++;
+        playChunk();
+      };
+      a.onerror = function () { fail(); };
+      try {
+        onlineAudio = a;
+        onlineActive = true;
+        ttsMarkSpeaking(true);
+        if (guard) clearTimeout(guard);
+        // 首块允许 6 秒（含网络与合成），后续块 8 秒；播放已开始就不再拦
+        guard = setTimeout(function () {
+          if (settled) return;
+          if (a.currentTime > 0.05) return;
+          fail(false);
+        }, idx === 0 ? 6000 : 8000);
+        a.src = baiduTtsUrl(chunks[idx]);
+        const pr = a.play();
+        if (pr && pr.catch) pr.catch(function (err) {
+          if (token !== onlineToken) return;
+          fail(!!err && err.name === "NotAllowedError");
+        });
+        prefetchNext();
+      } catch (err) { fail(); }
+    }
+
+    playChunk();
+    return true;
+  }
+
   /* 设置页的「朗读声音」选择器 */
   function ttsVoiceField() {
     const list = englishVoices();
@@ -371,8 +511,8 @@
       : "未检测到系统英文语音，当前会用离线内置语音朗读。";
     const natural = list.filter(function (v) { return /natural|neural|online/i.test(v.name || ""); }).length;
     const warn = !list.length
-      ? '<p class="mini-note">当前浏览器没有英文系统语音：单词会自动改用有道真人发音（需联网），整句用离线合成音。用 Microsoft Edge 打开可获得完整自然人声。</p>'
-      : (!natural ? '<p class="mini-note">当前英文语音偏机械：单词会自动改用有道真人发音（在线真人美音），整句仍走系统语音。想要全部人声，用 Microsoft Edge 打开。</p>' : "");
+      ? '<p class="mini-note">当前浏览器没有英文系统语音：单词自动用有道真人发音、整句自动用百度在线人声（需联网）；断网时用离线合成音。用 Microsoft Edge 打开可获得完整神经语音。</p>'
+      : (!natural ? '<p class="mini-note">当前英文语音偏机械：单词自动用有道真人发音，整句自动用百度在线人声（需联网）；断网时回落到系统语音。想要神经语音，用 Microsoft Edge 打开。</p>' : "");
     return `<div class="field" style="margin-top:10px"><label for="ttsVoiceSelect">朗读声音</label><select id="ttsVoiceSelect">${opts.join("")}</select><p class="mini-note">${hint}</p>${warn}</div>`;
   }
 
@@ -398,7 +538,7 @@
     paint('<p class="mini-note">正在检测……最多几秒。</p>');
     if (!("speechSynthesis" in window)) {
       ttsDiagActive = false;
-      paint('<p class="mini-note">检测结果：此浏览器不支持系统语音合成，只能用离线机械音。请改用 Microsoft Edge 打开本页。</p>');
+      paint('<p class="mini-note">检测结果：此浏览器不支持系统语音合成。单词会用有道真人发音、整句用百度在线人声（均需联网），断网时用离线机械音。</p>');
       return;
     }
     const synth = window.speechSynthesis;
@@ -418,13 +558,13 @@
       }
       let verdict;
       if (!list.length) {
-        verdict = "当前浏览器提供不了英文语音：单词会自动改用有道真人发音（需联网），整句只能离线合成音。建议改用 Microsoft Edge 打开。";
+        verdict = "当前浏览器提供不了英文语音：单词自动用有道真人发音、整句自动用百度在线人声（均需联网），断网时用离线机械音。";
       } else if (!naturalCount) {
-        verdict = "你的英文语音都是传统合成音，天生偏机械。单词已自动切到有道真人发音（在线）；整句想全人声，用 Microsoft Edge 打开。";
+        verdict = "你的英文语音都是传统合成音，天生偏机械。单词已自动切到有道真人发音，整句已自动切到百度在线人声（需联网）。";
       } else if (results.some(function (r) { return r.ok; })) {
         verdict = "神经网络音能正常出声。若刚才听到的仍是机械音，请把上方「朗读方式」切回「自动」，再点「试听一句」。";
       } else {
-        verdict = "检测到神经网络音但都没能出声：单词会自动用有道真人发音兜底；整句请检查网络或 Windows 设置 → 隐私和安全性 → 语音 →「在线语音识别」，或改用 Microsoft Edge 重开本页。";
+        verdict = "检测到神经网络音但都没能出声：单词会用有道真人发音、整句会用百度在线人声兜底（需联网）；也可检查 Windows 设置 → 隐私和安全性 → 语音 →「在线语音识别」。";
       }
       lines.push(verdict);
       ttsDiagActive = false;
@@ -616,6 +756,14 @@
           }
           return;
         }
+        // 整句/整段：系统语音失败后先试在线人声，只把剩下的部分交出去
+        if (!isWordLike(text) && speakOnlineSentence(text, function (rest) { speakBuiltin(rest || text); })) {
+          if (!nativeFailNoted) {
+            nativeFailNoted = true;
+            toast("系统语音没出声，整句改用在线人声");
+          }
+          return;
+        }
         if (!nativeFailNoted) {
           nativeFailNoted = true;
           toast("系统语音没能读出声，暂用离线机械音。想要自然人声：用 Microsoft Edge 打开本页");
@@ -698,9 +846,14 @@
   function speak(text) {
     text = String(text || "").trim();
     if (!text) return;
+    // 新的一次朗读先掐掉上一段在线音频，避免两段声音叠在一起
+    if (onlineAudio) { try { onlineAudio.pause(); } catch (err) {} onlineAudio = null; }
+    onlineToken++;
+    onlineActive = false;
     const mode = (state && TTS_MODES.indexOf(state.ttsMode) !== -1) ? state.ttsMode : "auto";
-    const nativeThenBuiltin = function () {
-      if (!speakNative(text)) speakBuiltin(text);
+    const nativeThenBuiltin = function (rest) {
+      const remain = (typeof rest === "string" && rest) ? rest : text;
+      if (!speakNative(remain)) speakBuiltin(remain);
     };
     if (mode === "builtin") {
       speakBuiltin(text);
@@ -710,8 +863,15 @@
       nativeThenBuiltin();
       return;
     }
-    // 自动：没有自然音的环境（360/Chrome/安卓常见），单词先走有道真人发音
-    if (!hasNaturalVoice() && speakOnline(text, nativeThenBuiltin)) return;
+    // 自动：没有自然音的环境（360/Chrome/安卓常见）：单词走有道真人，整句/整段走百度在线人声；
+    // 都失败再落到系统语音 → 离线音
+    if (!hasNaturalVoice()) {
+      if (isWordLike(text)) {
+        if (speakOnline(text, nativeThenBuiltin)) return;
+      } else if (speakOnlineSentence(text, nativeThenBuiltin)) {
+        return;
+      }
+    }
     nativeThenBuiltin();
   }
 
@@ -3394,7 +3554,7 @@
             <div class="chips">
               <button class="chip ${state.cardAutoplay ? "on" : ""}" data-action="toggle-card-autoplay">卡片切换后自动发音</button>
             </div>
-            <p class="mini-note">自动：优先系统英文语音，联网时选中的神经网络音（Aria/Jenny 等）最自然；浏览器没有英文语音时改用内置离线语音。改语速或换声音后会自动试读一句。</p>
+            <p class="mini-note">自动：优先系统神经语音（Aria/Jenny 等）；浏览器只有机械音或没有英文语音时，单词自动用有道真人发音，整句/整段自动用百度在线人声（需联网），断网再回落到系统语音与离线音。改语速或换声音后会自动试读一句。</p>
             <button class="text-link" data-action="test-tts">试听一句</button>
             <button class="text-link" data-action="tts-diag">语音自检</button>
             <div id="ttsDiag"></div>
