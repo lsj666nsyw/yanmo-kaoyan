@@ -3063,7 +3063,10 @@
     const st = active.st;
     const answers = st.answers;
     const chosen = answers.filter(function (x) { return x != null; }).length;
-    const letters = ["B", "C", "D", "E", "F"];
+    const fixedLabels = [set.first, set.last].map(String);
+    const letters = (set.paragraphs || [])
+      .map(function (p) { return String(p.label); })
+      .filter(function (lab) { return fixedLabels.indexOf(lab) === -1; });
     const paragraphs = set.paragraphs.map(function (p) {
       const fixed = p.label === set.first ? "已定首段" : p.label === set.last ? "已定末段" : "";
       return `<p><b class="order-tag">${p.label}</b>${esc(p.text)}${fixed ? ` <span class="tag">${fixed}</span>` : ""}</p>`;
@@ -3596,10 +3599,20 @@
       });
     }
     const nt = Array.isArray(raw.newtype) ? raw.newtype : [];
-    const headingMode = paper.newtype && paper.newtype.kind === "heading";
+    const ntKind = paper.newtype && paper.newtype.kind;
     for (let i = 0; i < EXAM_NEWTYPE_COUNT; i++) {
       let value = nt[i] == null || nt[i] === "" ? null : nt[i];
-      if (headingMode && value != null && /^\d+$/.test(String(value))) value = letter(Number(value));
+      if (value != null) {
+        if (ntKind === "heading") {
+          if (/^\d+$/.test(String(value))) value = letter(Number(value));
+          value = String(value);
+        } else if (ntKind === "seven") {
+          const num = Number(value);
+          if (Number.isInteger(num)) value = num;
+        } else if (ntKind === "order") {
+          value = String(value);
+        }
+      }
       base.newtype[i] = value;
     }
     base.translation = typeof raw.translation === "string" ? raw.translation : "";
@@ -4058,6 +4071,74 @@
       </article>`;
   }
 
+  function examNewtypeReviewBlock(paper, answers, q, flags) {
+    const nt = examNewtypeSet(paper);
+    const i = q - 40;
+    if (!nt || i < 0 || i >= EXAM_NEWTYPE_COUNT) return "";
+    const set = nt.set;
+    const picked = answers.newtype[i];
+    const correct = examNewtypeCorrect(paper, i);
+    const ok = picked != null && correct != null && String(picked) === String(correct);
+    const snip = function (t) {
+      const s = String(t || "").replace(/\s+/g, " ").trim();
+      return s.length > 90 ? s.slice(0, 90) + "…" : s;
+    };
+    const row = (function () {
+      if (nt.kind === "seven") {
+        const pickIdx = picked == null ? -1 : Number(picked);
+        const corIdx = correct == null ? -1 : Number(correct);
+        const pickText = set.options[pickIdx] ? snip(set.options[pickIdx]) : "";
+        const correctText = set.options[corIdx] ? snip(set.options[corIdx]) : "";
+        return `
+          <div class="nt-review-ctx">
+            ${pickText ? `<p class="nt-pick"><span>你选</span><b>${letter(pickIdx)}</b>${esc(pickText)}</p>` : ""}
+            ${correctText ? `<p class="nt-correct"><span>答案</span><b>${letter(corIdx)}</b>${esc(correctText)}</p>` : ""}
+          </div>`;
+      }
+      if (nt.kind === "heading") {
+        const idxOf = function (x) {
+          return typeof x === "string" && /^[A-Z]$/.test(x) ? x.charCodeAt(0) - 65 : -1;
+        };
+        const pi = idxOf(picked), ci = idxOf(correct);
+        const pickText = pi >= 0 && set.options[pi] ? snip(set.options[pi]) : "";
+        const correctText = ci >= 0 && set.options[ci] ? snip(set.options[ci]) : "";
+        const stem = set.sections && set.sections[i] ? snip(set.sections[i]) : "";
+        return `
+          <div class="nt-review-ctx">
+            ${stem ? `<p class="nt-stem"><span>段落</span>${esc(stem)}</p>` : ""}
+            ${pickText ? `<p class="nt-pick"><span>你选</span><b>${esc(picked)}</b>${esc(pickText)}</p>` : ""}
+            ${correctText ? `<p class="nt-correct"><span>答案</span><b>${esc(correct)}</b>${esc(correctText)}</p>` : ""}
+          </div>`;
+      }
+      const byLabel = function (lab) {
+        if (lab == null) return null;
+        const p = (set.paragraphs || []).find(function (x) { return String(x.label) === String(lab); });
+        return p ? snip(p.text) : null;
+      };
+      const pickText = byLabel(picked);
+      const correctText = byLabel(correct);
+      return `
+        <div class="nt-review-ctx">
+          ${pickText ? `<p class="nt-pick"><span>你选</span><b>${esc(picked)}</b>${esc(pickText)}</p>` : ""}
+          ${correctText ? `<p class="nt-correct"><span>答案</span><b>${esc(correct)}</b>${esc(correctText)}</p>` : ""}
+        </div>`;
+    })();
+    const kindName = nt.kind === "seven" ? "七选五" : nt.kind === "order" ? "排序" : "小标题";
+    return `
+      <article class="exam-q review-nt" id="exam-q-${q}" data-q="${q}">
+        <div class="exam-q-head">
+          <span class="q-no">${String(q + 1).padStart(2, "0")}</span>
+          <span class="q-type">新题型 · ${kindName}</span>
+          <span class="exam-q-result ${ok ? "ok" : "no"}">${picked == null ? "未答" : (ok ? "正确" : "错误")}</span>
+        </div>
+        ${row}
+        <div class="exam-answer-line">
+          <span class="${ok ? "good" : "bad"}">你的答案 ${picked != null ? examAnswerText(paper, q, picked) : "—"}</span>
+          <span class="good">正确答案 ${correct != null ? examAnswerText(paper, q, correct) : "—"}</span>
+        </div>
+      </article>`;
+  }
+
   function examClozeParagraph(text, answers, start) {
     return String(text).split(/(\{\{\d+\}\})/).map(function (part) {
       const m = part.match(/^\{\{(\d+)\}\}$/);
@@ -4167,7 +4248,10 @@
         const fixed = p.label === set.first || p.label === set.last;
         return `<p class="order-para"><span class="order-tag">${esc(p.label)}</span>${fixed ? `<span class="tag">${p.label === set.first ? "首段" : "末段"}</span>` : ""}${esc(p.text)}</p>`;
       }).join("");
-      const letters = ["B", "C", "D", "E", "F"];
+      const fixedLabels = [set.first, set.last].map(String);
+      const letters = (set.paragraphs || [])
+        .map(function (p) { return String(p.label); })
+        .filter(function (lab) { return fixedLabels.indexOf(lab) === -1; });
       const slots = answers.newtype.map(function (picked, i) {
         const picks = letters.map(function (lab) {
           const used = answers.newtype.indexOf(lab) !== -1 && picked !== lab;
@@ -4332,16 +4416,22 @@
       ? answers.translationS.filter(function (x) { return String(x).trim(); }).length
       : (String(answers.translation).trim() ? 1 : 0);
     counts.writing = [answers.writingA, answers.writingB].filter(function (x) { return String(x).trim(); }).length;
+    const transTotal = paper.translation.kind === "sentences" ? 5 : 1;
     const tabs = [
       ["cloze", "完形", 20, counts.cloze],
       ["reading", "阅读", 20, counts.reading],
       ["newtype", "新题型", 5, counts.newtype],
-      ["translation", "翻译", 5, counts.translation],
+      ["translation", "翻译", transTotal, counts.translation],
       ["writing", "写作", 2, counts.writing]
     ];
     return tabs.map(function (t) {
       return `<button class="${ui.examSection === t[0] ? "on" : ""}" data-action="exam-section" data-sec="${t[0]}">${t[1]}<span class="n">${t[3]} / ${t[2]}</span></button>`;
     }).join("");
+  }
+
+  function updateExamTabCount(sec, done, total) {
+    const n = document.querySelector('[data-action="exam-section"][data-sec="' + sec + '"] .n');
+    if (n) n.textContent = done + " / " + total;
   }
 
   function examPager() {
@@ -4545,6 +4635,7 @@
       return `<button class="chip ${current === t[0] ? "on" : ""}" data-action="exam-review-section" data-sec="${t[0]}">${t[1]}<span class="n">${right} / ${rang[1] - rang[0]}</span></button>`;
     }).join("");
     const blocks = list.map(function (q) {
+      if (current === "newtype") return examNewtypeReviewBlock(paper, rec.answers, q, rec.flags);
       return examQuestionBlock(paper, rec.answers, q, true, rec.flags);
     }).join("");
     return `
@@ -5392,6 +5483,7 @@
         const rec = state.exams.find(function (r) { return String(r.id) === String(data.id); });
         if (!rec) break;
         const i = Number(data.i);
+        if (!Number.isInteger(i) || i < 0 || i >= 5) break;
         if (!rec.self.translationPoints[i] && rec.self.translationPoints.filter(Boolean).length >= 5) break;
         rec.self.translationPoints[i] = !rec.self.translationPoints[i];
         examRecalc(rec);
@@ -6344,6 +6436,7 @@
             sheet.textContent = t.value.trim() ? "已写 " + countChars(t.value) + " 字" : "未写";
             sheet.classList.toggle("done", !!t.value.trim());
           }
+          updateExamTabCount("translation", t.value.trim() ? 1 : 0, 1);
           return;
         }
         if (/^trans-s\d$/.test(key)) {
@@ -6353,11 +6446,12 @@
           const counter = document.querySelector('[data-exam-count="' + key + '"]');
           if (counter) counter.textContent = "已写 " + countChars(t.value) + " 字";
           const sheet = document.querySelector('[data-sheet-sub="trans"]');
+          const n = active.answers.translationS.filter(function (x) { return String(x).trim(); }).length;
           if (sheet) {
-            const n = active.answers.translationS.filter(function (x) { return String(x).trim(); }).length;
             sheet.textContent = n + " / 5 句";
             sheet.classList.toggle("done", n > 0);
           }
+          updateExamTabCount("translation", n, 5);
           return;
         }
         if (key === "wa" || key === "wb") {
@@ -6371,6 +6465,8 @@
             sheet.textContent = t.value.trim() ? wordCount(t.value) + " 词" : "未写";
             sheet.classList.toggle("done", !!t.value.trim());
           }
+          const writtenNow = [active.answers.writingA, active.answers.writingB].filter(function (x) { return String(x).trim(); }).length;
+          updateExamTabCount("writing", writtenNow, 2);
           if (wordCount(t.value) >= 50) markTask(3, true);
           return;
         }
