@@ -935,6 +935,32 @@
     return { answers: [null, null, null, null, null], submitted: false, score: 0 };
   }
 
+  function mockPapers() {
+    return (window.MOCK_PAPERS || []).slice();
+  }
+
+  function mockPaper(id) {
+    return mockPapers().find(function (p) { return p.id === String(id); }) || null;
+  }
+
+  function mockType(key) {
+    const types = window.MOCK_TYPES || {};
+    return types[key] || types.en2 || {
+      key: "en2", label: "英语二", short: "英二", translation: 15,
+      writingA: 10, writingB: 15, summary: "", writingWords: "150 以上"
+    };
+  }
+
+  function emptyExamSelf() {
+    return {
+      translationPoints: [false, false, false, false, false],
+      translationSentences: [0, 0, 0, 0, 0],
+      writingA: { content: 0, format: 0, language: 0, accuracy: 0 },
+      writingB: { content: 0, structure: 0, language: 0, accuracy: 0 },
+      done: false
+    };
+  }
+
   function defaultState() {
     return {
       version: 1,
@@ -956,7 +982,12 @@
       headings: headingSets().map(function () { return emptyHeading(); }),
       translations: {},
       drafts: {},
-      trapStats: {}
+      transSelf: {},
+      draftSelf: {},
+      trapStats: {},
+      examType: "en2",
+      examActive: null,
+      exams: []
     };
   }
 
@@ -980,6 +1011,11 @@
       const right = Math.min(total, Math.max(0, Math.floor(Number(src.right) || 0)));
       if (total) merged.trapStats[type] = { total: total, right: right };
     });
+    merged.transSelf = plain(raw.transSelf) ? raw.transSelf : {};
+    merged.draftSelf = plain(raw.draftSelf) ? raw.draftSelf : {};
+    merged.examType = ["en1", "en2"].indexOf(raw.examType) !== -1 ? raw.examType : "en2";
+    merged.exams = (Array.isArray(raw.exams) ? raw.exams : []).map(normalizeExamRecord).filter(Boolean).slice(0, 30);
+    merged.examActive = normalizeExamActive(raw.examActive);
     // 间隔复习：老版本只存 known/fuzzy，没有到期时间。这里给旧标记补一条
     // “今天到期”，第一次复习后就会按 1/2/4/7/15/30 天进入正常节奏。
     merged.srs = {};
@@ -1066,6 +1102,20 @@
     } catch (err) { raw = null; }
     return normalizeState(raw);
   }
+
+  /* Exam constants must exist before the first normalizeState() call. */
+  const EXAM_TIME = 180 * 60;
+  const EXAM_CLOZE_COUNT = 20;
+  const EXAM_READING_COUNT = 20;
+  const EXAM_NEWTYPE_COUNT = 5;
+  const EXAM_OBJECTIVE_COUNT = EXAM_CLOZE_COUNT + EXAM_READING_COUNT + EXAM_NEWTYPE_COUNT;
+
+  const WRITING_A_DIMS = [
+    { key: "content", label: "内容与信息点", max: 5, hint: "称呼、目的、细节、请求是否齐全" },
+    { key: "format", label: "格式与语气", max: 2, hint: "称呼、结尾、署名；语气是否得体" },
+    { key: "language", label: "语言与句式", max: 2, hint: "句子是否通顺，是否有可读的复杂句" },
+    { key: "accuracy", label: "语法与拼写", max: 1, hint: "主谓一致、时态、拼写" }
+  ];
 
   const state = loadState();
 
@@ -1298,7 +1348,13 @@
     meTab: "notebook",
     redo: {},
     reviewed: {},
-    searchTimer: null
+    searchTimer: null,
+    examSection: "cloze",
+    examReading: 0,
+    examJumpQ: null,
+    examSubmitting: false,
+    examReviewAll: false,
+    examResultSection: "cloze"
   };
 
   function activeCloze() {
@@ -1375,7 +1431,7 @@
   const PAGE_TITLES = {
     home: "今日", vocab: "词汇", sentences: "长难句", reading: "阅读",
     cloze: "完形与新题型", translation: "翻译", writing: "写作",
-    plan: "真题与规划", me: "我的记录"
+    exam: "全真模考", plan: "真题与规划", me: "我的记录"
   };
 
   /* ------------------------------------------------------------------
@@ -2016,12 +2072,18 @@
       case "cloze": html = pageCloze(); break;
       case "translation": html = pageTranslation(); break;
       case "writing": html = pageWriting(); break;
+      case "exam":
+        if (route.param === "run") html = pageExamRun();
+        else if (route.param === "result") html = pageExamResult(route.sub);
+        else html = pageExam();
+        break;
       case "plan": html = pagePlan(); break;
       case "me": html = pageMe(); break;
       default: html = pageHome();
     }
 
     $("#main").innerHTML = html + footerNote();
+    document.body.classList.toggle("exam-run-mode", route.name === "exam" && route.param === "run");
     $$("[data-nav]").forEach(function (a) {
       a.classList.toggle("active", a.getAttribute("data-nav") === route.name);
     });
@@ -2075,6 +2137,19 @@
     }
     if (route.name === "vocab" && ui.vocabMode === "dictation") {
       setTimeout(focusDictation, 30);
+    }
+    if (route.name === "exam" && route.param === "run" && state.examActive) {
+      if (examRemaining() <= 0) {
+        setTimeout(function () { finishExam(true); }, 30);
+      } else if (ui.examJumpQ != null) {
+        const target = document.getElementById("exam-q-" + ui.examJumpQ);
+        ui.examJumpQ = null;
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
+          target.classList.add("focus-question");
+          setTimeout(function () { target.classList.remove("focus-question"); }, 1800);
+        }
+      }
     }
   }
 
@@ -3218,9 +3293,28 @@
       </div>`;
   }
 
+  function transSelfPanel(entry, key) {
+    const points = (entry && entry.points) || [];
+    if (!points.length) return "";
+    const checks = Array.isArray(state.transSelf[key]) ? state.transSelf[key] : [];
+    const n = points.filter(function (_, i) { return !!checks[i]; }).length;
+    const isPassage = String(key).charAt(0) === "p";
+    const scaled = isPassage ? Math.round(n / points.length * 15 * 2) / 2 : null;
+    return `
+      <div class="trans-self" data-trans-self="${esc(key)}">
+        <p class="label" style="margin-top:16px">得分点 · 自评</p>
+        <ul class="point-list">
+          ${points.map(function (p, i) {
+            const on = !!checks[i];
+            return `<li><button class="point-check ${on ? "on" : ""}" data-action="trans-point" data-key="${esc(key)}" data-i="${i}" aria-pressed="${on}"><i>${on ? "✓" : ""}</i><span>${esc(p)}</span></button></li>`;
+          }).join("")}
+        </ul>
+        <p class="self-score-line">已译出 <b data-trans-self-score>${n} / ${points.length}</b> 个采分点${isPassage ? " · 按英语二 15 分制折算 <b>" + examScoreText(scaled) + " / 15</b>" : ""}</p>
+      </div>`;
+  }
+
   function transRefPanel(entry, key) {
     if (!entry) return "";
-    const points = (entry.points || []).map(function (p) { return `<li>${esc(p)}</li>`; }).join("");
     const chunks = (entry.chunks || []).map(function (c) {
       return `<div class="chunk"><span class="en">${esc(c[0])}</span><span class="cn">${esc(c[1])}</span></div>`;
     }).join("");
@@ -3231,10 +3325,36 @@
       <div class="trans-ref" id="transRef-${key}">
         <p class="ref-label">参考译文</p>
         <p class="ref-cn">${esc(entry.ref)}</p>
-        ${points ? `<div class="points"><p class="label" style="margin-top:16px">得分点</p><ul>${points}</ul></div>` : ""}
+        ${transSelfPanel(entry, key)}
         ${chunks ? `<div class="chunks"><p class="label" style="margin-top:16px">意群切分</p>${chunks}</div>` : ""}
         ${words ? `<div class="word-pairs">${words}</div>` : ""}
       </div>`;
+  }
+
+  function updateTransSelfDom(key) {
+    const root = document.querySelector('[data-trans-self="' + key + '"]');
+    if (!root) return;
+    const entry = transEntryByKey(key);
+    const points = (entry && entry.points) || [];
+    const checks = Array.isArray(state.transSelf[key]) ? state.transSelf[key] : [];
+    const btns = root.querySelectorAll(".point-check");
+    btns.forEach(function (btn) {
+      const i = Number(btn.getAttribute("data-i"));
+      const on = !!checks[i];
+      btn.classList.toggle("on", on);
+      btn.setAttribute("aria-pressed", String(on));
+      const mark = btn.querySelector("i");
+      if (mark) mark.textContent = on ? "✓" : "";
+    });
+    const n = points.filter(function (_, i) { return !!checks[i]; }).length;
+    const score = root.querySelector("[data-trans-self-score]");
+    if (score) score.textContent = n + " / " + points.length;
+    const scaled = String(key).charAt(0) === "p" && points.length ? Math.round(n / points.length * 15 * 2) / 2 : null;
+    const line = root.querySelector(".self-score-line");
+    if (line) {
+      line.innerHTML = "已译出 <b data-trans-self-score>" + n + " / " + points.length + "</b> 个采分点" +
+        (scaled != null ? " · 按英语二 15 分制折算 <b>" + examScoreText(scaled) + " / 15</b>" : "");
+    }
   }
 
   /* ------------------------------------------------------------------
@@ -3323,14 +3443,62 @@
       </div>`;
   }
 
+  function draftSelfDims(kind) {
+    return kind === "small" ? WRITING_A_DIMS : writingBDims({ type: "en1" });
+  }
+
+  function updateDraftSelfDom(key) {
+    const root = document.querySelector('[data-draft-self="' + key + '"]');
+    if (!root) return;
+    const kind = key.indexOf("small-") === 0 ? "small" : "big";
+    const dims = draftSelfDims(kind);
+    const src = state.draftSelf[key] || {};
+    let got = 0;
+    dims.forEach(function (d) {
+      const cur = Math.max(0, Math.min(d.max, Number(src[d.key]) || 0));
+      got += cur;
+      root.querySelectorAll('.rubric-score[data-dim="' + d.key + '"]').forEach(function (btn) {
+        btn.classList.toggle("on", Number(btn.getAttribute("data-score")) === cur);
+      });
+    });
+    const score = root.querySelector("[data-draft-self-score]");
+    if (score) score.textContent = got + " / " + (kind === "small" ? 10 : 20);
+  }
+
   function draftBlock(w, kind, i, target) {
     const key = kind + "-" + i;
     const value = typeof state.drafts[key] === "string" ? state.drafts[key] : "";
+    const dims = draftSelfDims(kind);
+    const src = state.draftSelf[key] || {};
+    const got = dims.reduce(function (s, d) { return s + Math.max(0, Math.min(d.max, Number(src[d.key]) || 0)); }, 0);
+    const max = kind === "small" ? 10 : 20;
+    const rows = dims.map(function (d) {
+      const cur = Math.max(0, Math.min(d.max, Number(src[d.key]) || 0));
+      let buttons = "";
+      for (let n = 0; n <= d.max; n++) {
+        buttons += `<button class="rubric-score ${cur === n ? "on" : ""}" data-action="draft-self" data-key="${key}" data-dim="${d.key}" data-score="${n}" aria-label="${esc(d.label)} ${n} 分">${n}</button>`;
+      }
+      return `<div class="rubric-row">
+        <div class="rubric-copy"><b>${esc(d.label)}</b><span>${esc(d.hint)}</span></div>
+        <div class="rubric-scores">${buttons}</div>
+        <span class="rubric-max">${cur} / ${d.max}</span>
+      </div>`;
+    }).join("");
     return `
       <div class="draft-box">
         <div class="draft-head"><span class="label">写作练习</span><span class="score-note">目标 ${target} 词左右</span></div>
         <textarea data-draft="${key}" placeholder="先列提纲，再写。写完对照范文，只改三处：结构、语法、重复用词。">${esc(value)}</textarea>
         <div class="draft-foot"><span data-draft-count="${key}">${wordCount(value)} 词</span><span>内容仅保存在本机</span></div>
+        <details class="draft-self-box" data-draft-self="${key}">
+          <summary><span>写完后自评</span><b data-draft-self-score="${key}">${got} / ${max}</b></summary>
+          <div class="draft-self-body">
+            <div class="rubric-box no-border">
+              <div class="rubric-head"><h3>自评维度</h3><span>${got} / ${max}</span></div>
+              ${rows}
+            </div>
+            <p class="mini-note">按维度给分，不按感觉给分。${kind === "big" ? "英语二考生可按 15 分制折算。" : ""}自评只保存在本机，不影响其他记录。</p>
+          </div>
+        </details>
       </div>`;
   }
 
@@ -3379,6 +3547,1175 @@
   }
 
   /* ------------------------------------------------------------------
+     mock exam
+  ------------------------------------------------------------------ */
+
+  function writingBDims(paper) {
+    const en1 = paper && paper.type === "en1";
+    return [
+      { key: "content", label: "内容与切题", max: en1 ? 6 : 5, hint: "描述准确、分析有因果、结论回应题目" },
+      { key: "structure", label: "结构与连贯", max: en1 ? 5 : 4, hint: "三段清晰，段内有层次，衔接自然" },
+      { key: "language", label: "语言与句式", max: en1 ? 5 : 4, hint: "用词准确，句式有变化，不堆模板" },
+      { key: "accuracy", label: "语法与拼写", max: en1 ? 4 : 2, hint: "错误是否影响理解" }
+    ];
+  }
+
+  function emptyExamAnswers(paper) {
+    const reading = {};
+    (paper ? paper.readings : []).forEach(function (id) {
+      reading[String(id)] = [null, null, null, null, null];
+    });
+    return {
+      cloze: new Array(EXAM_CLOZE_COUNT).fill(null),
+      reading: reading,
+      newtype: new Array(EXAM_NEWTYPE_COUNT).fill(null),
+      translation: "",
+      translationS: ["", "", "", "", ""],
+      writingA: "",
+      writingB: ""
+    };
+  }
+
+  function normalizeExamAnswers(raw, paper) {
+    const base = emptyExamAnswers(paper);
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return base;
+    const cloze = Array.isArray(raw.cloze) ? raw.cloze : [];
+    for (let i = 0; i < EXAM_CLOZE_COUNT; i++) {
+      const rawV = cloze[i];
+      const v = rawV == null || rawV === "" ? NaN : Number(rawV);
+      base.cloze[i] = Number.isInteger(v) && v >= 0 && v <= 3 ? v : null;
+    }
+    if (raw.reading && typeof raw.reading === "object" && !Array.isArray(raw.reading)) {
+      Object.keys(base.reading).forEach(function (id) {
+        const src = Array.isArray(raw.reading[id]) ? raw.reading[id] : [];
+        base.reading[id] = base.reading[id].map(function (_, i) {
+          const rawV = src[i];
+          const v = rawV == null || rawV === "" ? NaN : Number(rawV);
+          return Number.isInteger(v) && v >= 0 && v <= 3 ? v : null;
+        });
+      });
+    }
+    const nt = Array.isArray(raw.newtype) ? raw.newtype : [];
+    const headingMode = paper.newtype && paper.newtype.kind === "heading";
+    for (let i = 0; i < EXAM_NEWTYPE_COUNT; i++) {
+      let value = nt[i] == null || nt[i] === "" ? null : nt[i];
+      if (headingMode && value != null && /^\d+$/.test(String(value))) value = letter(Number(value));
+      base.newtype[i] = value;
+    }
+    base.translation = typeof raw.translation === "string" ? raw.translation : "";
+    const ts = Array.isArray(raw.translationS) ? raw.translationS : [];
+    for (let i = 0; i < 5; i++) base.translationS[i] = typeof ts[i] === "string" ? ts[i] : "";
+    base.writingA = typeof raw.writingA === "string" ? raw.writingA : "";
+    base.writingB = typeof raw.writingB === "string" ? raw.writingB : "";
+    return base;
+  }
+
+  function normalizeExamActive(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const paper = mockPaper(raw.paperId);
+    if (!paper) return null;
+    const startedAt = Number(raw.startedAt);
+    const endAt = Number(raw.endAt);
+    if (!Number.isFinite(startedAt) || !Number.isFinite(endAt)) return null;
+    const answers = normalizeExamAnswers(raw.answers, paper);
+    const flags = (Array.isArray(raw.flags) ? raw.flags : []).map(Number).filter(function (q) {
+      return Number.isInteger(q) && q >= 0 && q < EXAM_OBJECTIVE_COUNT;
+    });
+    return {
+      paperId: paper.id,
+      startedAt: startedAt,
+      endAt: endAt,
+      answers: answers,
+      flags: Array.from(new Set(flags)),
+      startedLabel: typeof raw.startedLabel === "string" ? raw.startedLabel : ""
+    };
+  }
+
+  function normalizeExamRecord(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw) || typeof raw.id !== "string") return null;
+    const paper = mockPaper(raw.paperId);
+    if (!paper) return null;
+    const rec = Object.assign({}, raw);
+    rec.answers = normalizeExamAnswers(raw.answers, paper);
+    rec.flags = (Array.isArray(raw.flags) ? raw.flags : []).map(Number).filter(function (q) {
+      return Number.isInteger(q) && q >= 0 && q < EXAM_OBJECTIVE_COUNT;
+    });
+    rec.self = raw.self && typeof raw.self === "object" ? Object.assign(emptyExamSelf(), raw.self) : emptyExamSelf();
+    rec.self.translationPoints = Array.isArray(rec.self.translationPoints)
+      ? rec.self.translationPoints.slice(0, 5).map(Boolean)
+      : [false, false, false, false, false];
+    while (rec.self.translationPoints.length < 5) rec.self.translationPoints.push(false);
+    rec.self.translationSentences = Array.isArray(rec.self.translationSentences)
+      ? rec.self.translationSentences.slice(0, 5).map(function (x) { return Math.max(0, Math.min(2, Number(x) || 0)); })
+      : [0, 0, 0, 0, 0];
+    while (rec.self.translationSentences.length < 5) rec.self.translationSentences.push(0);
+    rec.submittedAt = Number(rec.submittedAt) || Date.now();
+    rec.usedSec = Math.max(0, Math.min(EXAM_TIME, Number(rec.usedSec) || 0));
+    rec.objective = Math.max(0, Math.min(60, Number(rec.objective) || 0));
+    examRecalc(rec);
+    return rec;
+  }
+
+  function examRemaining() {
+    if (!state.examActive) return 0;
+    return Math.max(0, Math.ceil((state.examActive.endAt - Date.now()) / 1000));
+  }
+
+  function examUsed(active) {
+    const a = active || state.examActive;
+    if (!a) return 0;
+    return Math.max(0, Math.min(EXAM_TIME, Math.round((Date.now() - a.startedAt) / 1000)));
+  }
+
+  function examClock(sec) {
+    const s = Math.max(0, Math.floor(sec));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const r = s % 60;
+    return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m + ":" + (r < 10 ? "0" : "") + r;
+  }
+
+  function examQInfo(q) {
+    if (q < 20) return { sec: "cloze", index: q, label: "完形" };
+    if (q < 40) return { sec: "reading", ri: Math.floor((q - 20) / 5), qi: (q - 20) % 5, label: "阅读" };
+    return { sec: "newtype", index: q - 40, label: "新题型" };
+  }
+
+  function examAnswerAt(paper, answers, q) {
+    const info = examQInfo(q);
+    if (info.sec === "cloze") return answers.cloze[q];
+    if (info.sec === "newtype") return answers.newtype[info.index];
+    const rid = paper.readings[info.ri];
+    const arr = answers.reading[String(rid)] || [];
+    return arr[info.qi];
+  }
+
+  function examSetAnswer(paper, answers, q, value) {
+    const info = examQInfo(q);
+    if (info.sec === "cloze") { answers.cloze[q] = value; return; }
+    if (info.sec === "newtype") { answers.newtype[info.index] = value; return; }
+    const rid = paper.readings[info.ri];
+    if (!Array.isArray(answers.reading[String(rid)])) answers.reading[String(rid)] = [null, null, null, null, null];
+    answers.reading[String(rid)][info.qi] = value;
+  }
+
+  function examAnsweredCount(paper, answers) {
+    let n = 0;
+    for (let q = 0; q < EXAM_OBJECTIVE_COUNT; q++) {
+      if (examAnswerAt(paper, answers, q) != null) n++;
+    }
+    return n;
+  }
+
+  function examNewtypeSet(paper) {
+    const spec = paper.newtype || {};
+    const list = spec.kind === "order" ? orderSets() : (spec.kind === "heading" ? headingSets() : sevenSets());
+    const index = Math.min(Math.max(Number(spec.index) || 0, 0), Math.max(0, list.length - 1));
+    const set = list[index];
+    return set ? { kind: spec.kind || "seven", set: set, index: index } : null;
+  }
+
+  function examNewtypeCorrect(paper, i) {
+    const nt = examNewtypeSet(paper);
+    if (!nt) return null;
+    const answer = nt.set.answers[i];
+    if (answer == null) return null;
+    return nt.kind === "heading" ? letter(answer) : answer;
+  }
+
+  function examNewtypeRight(paper, answers, i) {
+    const correct = examNewtypeCorrect(paper, i);
+    const picked = answers.newtype[i];
+    if (picked == null || correct == null) return false;
+    return String(picked) === String(correct);
+  }
+
+  function examGrade(paper, answers) {
+    const out = {
+      cloze: { right: 0, total: 20, max: 10, score: 0 },
+      reading: { right: 0, total: 20, max: 40, score: 0 },
+      newtype: { right: 0, total: 5, max: 10, score: 0 },
+      objective: 0, subjective: 0, total: 0
+    };
+    paper.cloze.forEach(function (ci, pi) {
+      const set = clozeSets()[ci];
+      if (!set) return;
+      set.items.forEach(function (item, ii) {
+        const v = answers.cloze[pi * 10 + ii];
+        if (v != null && Number(v) === Number(item.answer)) out.cloze.right++;
+      });
+    });
+    paper.readings.forEach(function (rid) {
+      const r = (window.READINGS || []).find(function (x) { return x.id === Number(rid); });
+      const arr = answers.reading[String(rid)] || [];
+      if (!r) return;
+      r.questions.forEach(function (q, qi) {
+        if (arr[qi] != null && Number(arr[qi]) === Number(q.answer)) out.reading.right++;
+      });
+    });
+    for (let i = 0; i < 5; i++) {
+      if (examNewtypeRight(paper, answers, i)) out.newtype.right++;
+    }
+    out.cloze.score = out.cloze.right * 0.5;
+    out.reading.score = out.reading.right * 2;
+    out.newtype.score = out.newtype.right * 2;
+    out.objective = out.cloze.score + out.reading.score + out.newtype.score;
+    return out;
+  }
+
+  function examSelfScore(rec, paper) {
+    const type = mockType(paper.type);
+    const self = rec.self || emptyExamSelf();
+    let trans = 0;
+    if (paper.translation.kind === "sentences") {
+      trans = (self.translationSentences || []).reduce(function (s, x) { return s + Math.max(0, Math.min(2, Number(x) || 0)); }, 0);
+    } else {
+      const points = (transEntryByKey(paperKeyTranslation(paper)) || {}).points || [];
+      const checked = (self.translationPoints || []).filter(Boolean).length;
+      trans = points.length ? Math.round(checked / points.length * type.translation * 2) / 2 : 0;
+    }
+    const sumDims = function (dims, src) {
+      return dims.reduce(function (s, d) {
+        return s + Math.max(0, Math.min(d.max, Number((src || {})[d.key]) || 0));
+      }, 0);
+    };
+    const wa = sumDims(WRITING_A_DIMS, self.writingA);
+    const wb = sumDims(writingBDims(paper), self.writingB);
+    return { translation: trans, writingA: wa, writingB: wb, subjective: trans + wa + wb };
+  }
+
+  function paperKeyTranslation(paper) {
+    return paper.translation.kind === "passage" ? "p" + paper.translation.id : "";
+  }
+
+  function examRecalc(rec) {
+    const paper = mockPaper(rec.paperId);
+    if (!paper) return rec;
+    const grade = examGrade(paper, rec.answers);
+    const selfScore = examSelfScore(rec, paper);
+    rec.objective = grade.objective;
+    rec.subjective = selfScore.subjective;
+    rec.total = Math.round((rec.objective + rec.subjective) * 10) / 10;
+    rec.sections = {
+      cloze: grade.cloze.score,
+      reading: grade.reading.score,
+      newtype: grade.newtype.score,
+      translation: selfScore.translation,
+      writingA: selfScore.writingA,
+      writingB: selfScore.writingB
+    };
+    rec.rightCounts = { cloze: grade.cloze.right, reading: grade.reading.right, newtype: grade.newtype.right };
+    return rec;
+  }
+
+  function examScoreText(n) {
+    const v = Math.round(Number(n) * 10) / 10;
+    return Number.isInteger(v) ? String(v) : v.toFixed(1);
+  }
+
+  function examDateText(ts) {
+    const d = new Date(Number(ts) || Date.now());
+    return ymd(d) + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  }
+
+  function examFullLabel(paper) {
+    return mockType(paper.type).label + " · " + paper.label + " " + paper.name;
+  }
+
+  function examRecordsOf(paperId) {
+    return state.exams.filter(function (r) { return r.paperId === paperId; });
+  }
+
+  function pageExam() {
+    const active = state.examActive ? normalizeExamActive(state.examActive) : null;
+    const activePaper = active ? mockPaper(active.paperId) : null;
+    const typeKey = state.examType === "en1" ? "en1" : "en2";
+    const type = mockType(typeKey);
+    const papers = mockPapers().filter(function (p) { return p.type === typeKey; });
+
+    const typeChips = Object.keys(window.MOCK_TYPES || {}).map(function (k) {
+      const t = mockType(k);
+      return `<button class="chip ${typeKey === k ? "on" : ""}" data-action="exam-type" data-type="${k}">${esc(t.label)}<span class="n">${k === "en1" ? "10+10+20" : "15+10+15"}</span></button>`;
+    }).join("");
+
+    const activeBanner = active && activePaper ? `
+      <section class="exam-active-banner">
+        <div class="exam-active-copy">
+          <p class="eyebrow">未交卷</p>
+          <h2>${esc(examFullLabel(activePaper))}</h2>
+          <p>已进行 ${mmss(examUsed(active))}，${examRemaining() > 0 ? "剩余 " + examClock(examRemaining()) : "已超过考试时间"}。答案保存在本机，刷新页面不会丢失。</p>
+        </div>
+        <div class="exam-active-actions">
+          <a class="btn btn-solid" href="#/exam/run">${examRemaining() > 0 ? "继续答题" : "结束并查看"}</a>
+          <button class="text-link muted" data-action="exam-discard" data-id="${esc(active.paperId)}">放弃本次</button>
+        </div>
+      </section>` : "";
+
+    const cards = papers.map(function (p) {
+      const t = mockType(p.type);
+      const readings = p.readings.map(function (id) {
+        const r = (window.READINGS || []).find(function (x) { return x.id === Number(id); });
+        return r ? r.title : "";
+      }).filter(Boolean);
+      const records = examRecordsOf(p.id);
+      const scored = records.filter(function (r) { return r.self && r.self.done; });
+      const best = scored.length ? Math.max.apply(null, scored.map(function (r) { return Number(r.total) || 0; })) : null;
+      const last = records.length ? records[0] : null;
+      const lastDone = !!(last && last.self && last.self.done);
+      const lastScore = last ? (lastDone ? last.total : last.objective) : null;
+      const nt = p.newtype.kind === "order" ? "排序" : (p.newtype.kind === "heading" ? "小标题" : "七选五");
+      return `
+        <article class="exam-paper">
+          <div class="exam-paper-top">
+            <span class="tag hot">${esc(t.label)}</span>
+            <span class="exam-paper-no">${esc(p.label)}</span>
+          </div>
+          <h3>${esc(p.name)}</h3>
+          <p class="exam-paper-note">${esc(p.note)}</p>
+          <dl class="exam-paper-facts">
+            <div><dt>完形</dt><dd>2 篇 · 20 空</dd></div>
+            <div><dt>阅读</dt><dd>4 篇 · 20 题</dd></div>
+            <div><dt>新题型</dt><dd>${esc(nt)} · 5 题</dd></div>
+            <div><dt>翻译</dt><dd>${p.translation.kind === "sentences" ? "5 句" : "1 段"} · ${t.translation} 分</dd></div>
+            <div><dt>写作</dt><dd>小 ${t.writingA} + 大 ${t.writingB}</dd></div>
+          </dl>
+          <p class="exam-paper-readings">${readings.map(esc).join(" / ")}</p>
+          <div class="exam-paper-foot">
+            <span class="exam-paper-best">${best != null ? "最好 " + examScoreText(best) + " 分" : (last ? "上次 " + examScoreText(lastScore) + " 分" + (lastDone ? "" : "（客观）") : "尚未做过")}</span>
+            <button class="btn btn-sm btn-solid" data-action="exam-start" data-id="${esc(p.id)}" ${active ? "disabled" : ""}>${active ? "先完成当前模考" : "开始 180 分钟"}</button>
+          </div>
+        </article>`;
+    }).join("");
+
+    const records = state.exams.slice(0, 10);
+    const scored = state.exams.filter(function (r) { return r.self && r.self.done; });
+    const bestAll = scored.length ? Math.max.apply(null, scored.map(function (r) { return Number(r.total) || 0; })) : null;
+    const recordRows = records.map(function (r) {
+      const paper = mockPaper(r.paperId);
+      if (!paper) return "";
+      return `<tr>
+        <td class="num">${esc(examDateText(r.submittedAt).slice(5))}</td>
+        <td>${esc(mockType(paper.type).short + " · " + paper.label)}</td>
+        <td class="num">${examScoreText(r.objective)} / 60</td>
+        <td class="num">${r.self && r.self.done ? examScoreText(r.subjective) + " / 40" : "待自评"}</td>
+        <td class="num"><b>${r.self && r.self.done ? examScoreText(r.total) : examScoreText(r.objective)}</b></td>
+        <td class="num">${mmss(r.usedSec)}</td>
+        <td><a class="text-link" href="#/exam/result/${esc(r.id)}">${r.self && r.self.done ? "看解析" : "去自评"}</a></td>
+      </tr>`;
+    }).join("");
+    const recordBlock = records.length ? `
+      <div class="table-wrap">
+        <table class="data exam-history-table">
+          <thead><tr><th>日期</th><th>卷别</th><th>客观</th><th>主观</th><th>总分</th><th>用时</th><th></th></tr></thead>
+          <tbody>${recordRows}</tbody>
+        </table>
+      </div>
+      <p class="mini-note">总分先按客观题计算；完成翻译与写作自评后才是最终成绩。记录只保存在本机浏览器。</p>` : `
+      <div class="empty"><p class="mark">卷</p><p>还没有模考记录。选一份卷子，按 180 分钟完整走一遍。</p></div>`;
+
+    return `
+      ${pageHead("08", "模考", "全真模考", "一次做完，一次看明白。180 分钟、45 道客观题、翻译与写作自评，成绩与错题都留在本机。")}
+      ${activeBanner}
+
+      <section class="exam-intro-panel">
+        <div>
+          <p class="eyebrow">原创仿真卷</p>
+          <h2>按考场顺序，把时间用对</h2>
+          <p>完形 15–18 分钟，阅读 65–75 分钟，新题型 15 分钟，翻译 20 分钟，写作 50–55 分钟。中途离开不会暂停计时，交卷前请预留 5 分钟检查答题卡。</p>
+        </div>
+        <div class="exam-intro-stats">
+          <div><b>180</b><span>分钟</span></div>
+          <div><b>45</b><span>客观题</span></div>
+          <div><b>100</b><span>分制</span></div>
+        </div>
+      </section>
+
+      <div class="toolbar exam-type-bar">
+        <div class="chips">${typeChips}</div>
+        <span class="count-line">${esc(type.summary)}</span>
+      </div>
+      <div class="exam-paper-grid">${cards}</div>
+
+      <details class="acc exam-rules">
+        <summary><span class="acc-no">!</span><span class="acc-title">考试规则与答题说明</span><span class="acc-sub">开始前看一遍</span><span class="acc-plus"></span></summary>
+        <div class="acc-body">
+          <ul class="exam-rule-list">
+            <li><b>计时</b>开始后连续计时 180 分钟，时间到自动交卷；刷新、切页、关掉标签页都不会暂停。</li>
+            <li><b>客观题</b>完形 20 题（每题 0.5 分）、阅读 20 题（每题 2 分）、新题型 5 题（每题 2 分），共 60 分，交卷即出分。</li>
+            <li><b>主观题</b>翻译与写作按采分点、评分维度自评，满分 40 分；自评完成后生成最终总分。</li>
+            <li><b>答题卡</b>右侧答题卡可直接跳题；拿不准的题点“标记”，交卷前集中回看。手机上答题卡在页面底部。</li>
+            <li><b>材料</b>卷面文章均为原创仿真材料，不冒充历年真题；考试中不提供范文与参考译文。</li>
+          </ul>
+        </div>
+      </details>
+
+      <section class="section">
+        <div class="section-head"><h2>模考记录</h2><span class="section-note">${state.exams.length} 次${bestAll != null ? " · 最高 " + examScoreText(bestAll) + " 分" : ""}</span></div>
+        ${recordBlock}
+      </section>`;
+  }
+
+
+  function examCorrectAt(paper, q) {
+    const info = examQInfo(q);
+    if (info.sec === "cloze") {
+      const pi = Math.floor(q / 10);
+      const set = clozeSets()[paper.cloze[pi]];
+      const item = set && set.items[q % 10];
+      return item ? Number(item.answer) : null;
+    }
+    if (info.sec === "newtype") return examNewtypeCorrect(paper, info.index);
+    const r = (window.READINGS || []).find(function (x) { return x.id === Number(paper.readings[info.ri]); });
+    const item = r && r.questions[info.qi];
+    return item ? Number(item.answer) : null;
+  }
+
+  function examExplainAt(paper, q) {
+    const info = examQInfo(q);
+    if (info.sec === "cloze") {
+      const pi = Math.floor(q / 10);
+      const set = clozeSets()[paper.cloze[pi]];
+      const item = set && set.items[q % 10];
+      return item ? { text: item.explain || "", loc: "第 " + (q + 1) + " 空" } : { text: "", loc: "" };
+    }
+    if (info.sec === "newtype") {
+      const nt = examNewtypeSet(paper);
+      if (!nt) return { text: "", loc: "" };
+      return { text: (nt.set.explain || [])[info.index] || "", loc: "新题型 第 " + (info.index + 1) + " 题" };
+    }
+    const r = (window.READINGS || []).find(function (x) { return x.id === Number(paper.readings[info.ri]); });
+    const item = r && r.questions[info.qi];
+    if (!item) return { text: "", loc: "" };
+    const ev = readingEvidence(r.id, info.qi);
+    return {
+      text: item.explain || "",
+      loc: item.loc || "",
+      evidence: ev || null,
+      rid: r.id,
+      qi: info.qi
+    };
+  }
+
+  function examAnswerText(paper, q, value) {
+    if (value == null) return "—";
+    const info = examQInfo(q);
+    if (info.sec === "newtype") {
+      const nt = examNewtypeSet(paper);
+      if (nt && nt.kind !== "seven") return String(value);
+      return letter(Number(value));
+    }
+    return letter(Number(value));
+  }
+
+  function examQuestionBlock(paper, answers, q, submitted, flags) {
+    const info = examQInfo(q);
+    const picked = examAnswerAt(paper, answers, q);
+    const correct = examCorrectAt(paper, q);
+    const flagged = (flags || []).indexOf(q) !== -1;
+    const options = (function () {
+      let list = [];
+      if (info.sec === "reading") {
+        const r = (window.READINGS || []).find(function (x) { return x.id === Number(paper.readings[info.ri]); });
+        const item = r && r.questions[info.qi];
+        list = item ? item.options : [];
+      } else if (info.sec === "cloze") {
+        const pi = Math.floor(q / 10);
+        const set = clozeSets()[paper.cloze[pi]];
+        const item = set && set.items[q % 10];
+        list = item ? item.options : [];
+      }
+      return list.map(function (opt, oi) {
+        let cls = "option";
+        if (submitted) {
+          if (Number(oi) === Number(correct)) cls += " correct";
+          else if (picked != null && Number(oi) === Number(picked)) cls += " wrong";
+          else cls += " dim";
+        } else if (picked != null && Number(oi) === Number(picked)) {
+          cls += " sel";
+        }
+        return `<button class="${cls}" data-action="exam-pick" data-q="${q}" data-oi="${oi}" ${submitted ? "disabled" : ""}><i>${letter(oi)}</i><span>${esc(opt)}</span></button>`;
+      }).join("");
+    })();
+    const exp = submitted ? examExplainAt(paper, q) : null;
+    const ev = exp && exp.evidence ? `
+      <div class="evidence-chain compact">
+        <div class="evidence-head"><span>题眼句</span><span>${esc(exp.loc || "")}</span></div>
+        <blockquote>${esc(exp.evidence.evidence || "")}</blockquote>
+        ${readingEvidenceCn(exp.rid, exp.qi) ? `<p class="evidence-cn"><b>句意</b> ${esc(readingEvidenceCn(exp.rid, exp.qi))}</p>` : ""}
+        ${exp.evidence.paraphrase ? `<p class="paraphrase"><b>同义替换</b> ${esc(exp.evidence.paraphrase)}</p>` : ""}
+      </div>` : "";
+    return `
+      <article class="exam-q" id="exam-q-${q}" data-q="${q}">
+        <div class="exam-q-head">
+          <span class="q-no">${String(q + 1).padStart(2, "0")}</span>
+          <span class="q-type">${esc(info.label)}</span>
+          ${submitted ? `<span class="exam-q-result ${picked != null && String(picked) === String(correct) ? "ok" : "no"}">${picked == null ? "未答" : (String(picked) === String(correct) ? "正确" : "错误")}</span>` : `<button class="exam-flag ${flagged ? "on" : ""}" data-action="exam-flag" data-q="${q}" aria-pressed="${flagged}">${flagged ? "已标记" : "标记"}</button>`}
+        </div>
+        ${options ? `<div class="options exam-options ${info.sec === "cloze" ? "compact" : ""}">${options}</div>` : ""}
+        ${submitted ? `<div class="exam-answer-line"><span class="${picked != null && String(picked) === String(correct) ? "good" : "bad"}">你的答案 ${picked != null ? examAnswerText(paper, q, picked) : "—"}</span><span class="good">正确答案 ${correct != null ? examAnswerText(paper, q, correct) : "—"}</span></div>` : ""}
+        ${submitted && exp && exp.text ? `<div class="q-explain"><span class="loc">${esc(exp.loc || "")}</span>${esc(exp.text)}</div>` : ""}
+        ${ev}
+      </article>`;
+  }
+
+  function examClozeParagraph(text, answers, start) {
+    return String(text).split(/(\{\{\d+\}\})/).map(function (part) {
+      const m = part.match(/^\{\{(\d+)\}\}$/);
+      if (!m) return esc(part);
+      const n = Number(m[1]);
+      const q = start + n - 1;
+      const v = answers.cloze[q];
+      return `<button class="exam-blank ${v != null ? "filled" : ""}" data-action="exam-jump" data-q="${q}" aria-label="第 ${q + 1} 空">${n}${v != null ? " " + letter(v) : ""}</button>`;
+    }).join("");
+  }
+
+  function examClozeSection(paper, answers, flags) {
+    let q = 0;
+    return paper.cloze.map(function (ci, pi) {
+      const set = clozeSets()[ci];
+      if (!set) return "";
+      const start = q;
+      q += 10;
+      const paragraphs = set.paragraphs.map(function (p) {
+        return `<p>${examClozeParagraph(p, answers, start)}</p>`;
+      }).join("");
+      const items = set.items.map(function (_, ii) {
+        return examQuestionBlock(paper, answers, start + ii, false, flags);
+      }).join("");
+      return `
+        <section class="exam-part">
+          <div class="exam-part-head">
+            <p class="eyebrow">Part A · 完形 ${pi + 1} / 2</p>
+            <h2>${esc(set.title || "完形填空")}</h2>
+            <p class="exam-part-note">${esc(set.intro || "")}</p>
+          </div>
+          <div class="exam-passage cloze-passage">${paragraphs}</div>
+          <div class="exam-question-list">${items}</div>
+        </section>`;
+    }).join("");
+  }
+
+  function examReadingSection(paper, answers, flags) {
+    const rid = paper.readings[ui.examReading] || paper.readings[0];
+    const r = (window.READINGS || []).find(function (x) { return x.id === Number(rid); });
+    if (!r) return `<div class="empty"><p class="mark">空</p><p>这篇阅读暂时不可用。</p></div>`;
+    const tabs = paper.readings.map(function (id, i) {
+      const item = (window.READINGS || []).find(function (x) { return x.id === Number(id); });
+      return `<button class="chip ${i === ui.examReading ? "on" : ""}" data-action="exam-reading" data-ri="${i}">阅读 ${i + 1}<span class="n">${item ? item.questions.length : 0}</span></button>`;
+    }).join("");
+    const paragraphs = r.paragraphs.map(function (p, i) {
+      return `<p><span class="para">${i + 1}</span>${esc(p)}</p>`;
+    }).join("");
+    const questions = r.questions.map(function (_, qi) {
+      return examQuestionBlock(paper, answers, 20 + ui.examReading * 5 + qi, false, flags);
+    }).join("");
+    return `
+      <section class="exam-part">
+        <div class="exam-part-head">
+          <p class="eyebrow">Part A · 阅读 ${ui.examReading + 1} / 4</p>
+          <h2>${esc(r.title)}</h2>
+          <p class="exam-part-note">${esc(r.topic)} · 建议 ${r.minutes} 分钟 · 5 题</p>
+        </div>
+        <div class="chips exam-reading-tabs">${tabs}</div>
+        <div class="exam-passage reading-passage">${paragraphs}</div>
+        <div class="exam-question-list">${questions}</div>
+      </section>`;
+  }
+
+  function examSevenParagraph(text, answers, start) {
+    return String(text).split(/(\{\{\d+\}\})/).map(function (part) {
+      const m = part.match(/^\{\{(\d+)\}\}$/);
+      if (!m) return esc(part);
+      const i = Number(m[1]) - 1;
+      const v = answers.newtype[i];
+      return `<span class="exam-inline-slot ${v != null ? "filled" : ""}">${v != null ? letter(Number(v)) : i + 1}</span>`;
+    }).join("");
+  }
+
+  function examNewtypeSection(paper, answers, flags) {
+    const nt = examNewtypeSet(paper);
+    if (!nt) return `<div class="empty"><p class="mark">空</p><p>这份卷子的新题型暂时不可用。</p></div>`;
+    const set = nt.set;
+    if (nt.kind === "seven") {
+      const paragraphs = set.paragraphs.map(function (p) {
+        return `<p>${examSevenParagraph(p, answers, 0)}</p>`;
+      }).join("");
+      const options = set.options.map(function (opt, oi) {
+        const used = answers.newtype.indexOf(oi) !== -1;
+        return `<div class="seven-option ${used ? "used" : ""}"><i>${letter(oi)}</i><span class="en">${esc(opt)}</span></div>`;
+      }).join("");
+      const slots = answers.newtype.map(function (picked, i) {
+        const picks = set.options.map(function (_, oi) {
+          return `<button class="slot-pick ${picked === oi ? "on" : ""} ${answers.newtype.indexOf(oi) !== -1 && picked !== oi ? "used" : ""}" data-action="exam-npick" data-i="${i}" data-val="${oi}">${letter(oi)}</button>`;
+        }).join("");
+        return `<div class="seven-slot" id="exam-q-${40 + i}" data-q="${40 + i}"><label>第 ${i + 1} 空</label><div class="slot-options">${picks}</div></div>`;
+      }).join("");
+      return `
+        <section class="exam-part">
+          <div class="exam-part-head">
+            <p class="eyebrow">Part B · 新题型 · 七选五</p>
+            <h2>${esc(set.title || "七选五")}</h2>
+            <p class="exam-part-note">${esc(set.intro || "")}</p>
+          </div>
+          <div class="exam-passage seven-passage">${paragraphs}</div>
+          <div class="seven-options"><p class="label">选项</p>${options}</div>
+          <div class="seven-selects">${slots}</div>
+        </section>`;
+    }
+    if (nt.kind === "order") {
+      const paragraphs = set.paragraphs.map(function (p) {
+        const fixed = p.label === set.first || p.label === set.last;
+        return `<p class="order-para"><span class="order-tag">${esc(p.label)}</span>${fixed ? `<span class="tag">${p.label === set.first ? "首段" : "末段"}</span>` : ""}${esc(p.text)}</p>`;
+      }).join("");
+      const letters = ["B", "C", "D", "E", "F"];
+      const slots = answers.newtype.map(function (picked, i) {
+        const picks = letters.map(function (lab) {
+          const used = answers.newtype.indexOf(lab) !== -1 && picked !== lab;
+          return `<button class="slot-pick ${picked === lab ? "on" : ""} ${used ? "used" : ""}" data-action="exam-npick" data-i="${i}" data-val="${lab}">${lab}</button>`;
+        }).join("");
+        return `<div class="seven-slot" id="exam-q-${40 + i}" data-q="${40 + i}"><label>第 ${i + 1} 段</label><div class="slot-options">${picks}</div></div>`;
+      }).join("");
+      return `
+        <section class="exam-part">
+          <div class="exam-part-head">
+            <p class="eyebrow">Part B · 新题型 · 排序</p>
+            <h2>${esc(set.title || "排序")}</h2>
+            <p class="exam-part-note">${esc(set.intro || "")}</p>
+          </div>
+          <div class="exam-passage order-passage">${paragraphs}</div>
+          <div class="seven-selects">${slots}</div>
+        </section>`;
+    }
+    const options = set.options.map(function (opt, oi) {
+      const used = answers.newtype.indexOf(letter(oi)) !== -1;
+      return `<div class="seven-option ${used ? "used" : ""}"><i>${letter(oi)}</i><span class="en">${esc(opt)}</span></div>`;
+    }).join("");
+    const sections = set.sections.map(function (text, i) {
+      const picked = answers.newtype[i];
+      const picks = set.options.map(function (_, oi) {
+        const lab = letter(oi);
+        const used = answers.newtype.indexOf(lab) !== -1 && picked !== lab;
+        return `<button class="slot-pick ${picked === lab ? "on" : ""} ${used ? "used" : ""}" data-action="exam-npick" data-i="${i}" data-val="${lab}">${lab}</button>`;
+      }).join("");
+      return `<div class="heading-item" id="exam-q-${40 + i}" data-q="${40 + i}"><div class="heading-text"><span class="tag">第 ${i + 1} 段</span><p>${esc(text)}</p></div><div class="seven-slot"><label>选择标题</label><div class="slot-options">${picks}</div></div></div>`;
+    }).join("");
+    return `
+      <section class="exam-part">
+        <div class="exam-part-head">
+          <p class="eyebrow">Part B · 新题型 · 小标题</p>
+          <h2>${esc(set.title || "小标题匹配")}</h2>
+          <p class="exam-part-note">${esc(set.intro || "")}</p>
+        </div>
+        <div class="seven-options heading-options"><p class="label">标题选项</p>${options}</div>
+        <div class="heading-list">${sections}</div>
+      </section>`;
+  }
+
+  function examTranslationSection(paper, answers) {
+    const type = mockType(paper.type);
+    if (paper.translation.kind === "sentences") {
+      const ids = paper.translation.ids || [];
+      const items = ids.map(function (id, i) {
+        const s = (window.TRANSLATIONS.sentences || []).find(function (x) { return x.id === Number(id); });
+        const value = answers.translationS[i] || "";
+        return `
+          <article class="exam-trans-sentence">
+            <div class="trans-head"><span class="label">句子 ${i + 1}</span><span class="tag">2 分</span></div>
+            <p class="trans-en">${esc(s ? s.en : "")}</p>
+            <textarea class="trans-input" data-exam-input="trans-s${i}" placeholder="译成中文，注意句子结构和指代。">${esc(value)}</textarea>
+            <div class="trans-count"><span data-exam-count="trans-s${i}">已写 ${countChars(value)} 字</span><span>参考译文在交卷后出现</span></div>
+          </article>`;
+      }).join("");
+      return `
+        <section class="exam-part">
+          <div class="exam-part-head">
+            <p class="eyebrow">Part C · 翻译</p>
+            <h2>英译汉 · 5 句</h2>
+            <p class="exam-part-note">共 ${type.translation} 分。先抓主干，再处理修饰；每句写完留半分钟回读。</p>
+          </div>
+          <div class="exam-trans-list">${items}</div>
+        </section>`;
+    }
+    const entry = transEntryByKey("p" + paper.translation.id);
+    const value = answers.translation || "";
+    const paragraphs = entry ? String(entry.en).split(/\n{2,}/).map(function (p) { return `<p>${esc(p)}</p>`; }).join("") : "";
+    return `
+      <section class="exam-part">
+        <div class="exam-part-head">
+          <p class="eyebrow">Part C · 翻译</p>
+          <h2>${esc(entry ? entry.title : "英译汉")}</h2>
+          <p class="exam-part-note">共 ${type.translation} 分。译成连贯的中文，不要逐词硬译；参考译文与采分点在交卷后出现。</p>
+        </div>
+        <div class="exam-passage passage-en">${paragraphs}</div>
+        <textarea class="trans-input trans-input-lg" data-exam-input="trans" placeholder="按段落翻译，注意句间衔接。">${esc(value)}</textarea>
+        <div class="trans-count"><span data-exam-count="trans">已写 ${countChars(value)} 字</span><span>参考译文约 ${entry ? countChars(entry.ref) : 0} 字</span></div>
+      </section>`;
+  }
+
+  function examWritingSection(paper, answers) {
+    const type = mockType(paper.type);
+    const small = (window.WRITING.small || [])[paper.writing.small];
+    const big = (window.WRITING.big || [])[paper.writing.big];
+    const wa = answers.writingA || "";
+    const wb = answers.writingB || "";
+    return `
+      <section class="exam-part">
+        <div class="exam-part-head">
+          <p class="eyebrow">Part D · 写作</p>
+          <h2>两篇作文</h2>
+          <p class="exam-part-note">小作文 ${type.writingA} 分，大作文 ${type.writingB} 分。先列提纲，再落笔；交卷后按维度自评。</p>
+        </div>
+        <article class="exam-writing-block">
+          <div class="trans-head"><span class="label">Part A · 小作文 · ${type.writingA} 分</span><span class="tag">约 100 词</span></div>
+          <div class="prompt-box"><span class="label">题目</span><p>${esc(small ? small.scene : "")}</p></div>
+          <textarea class="trans-input trans-input-lg" data-exam-input="wa" placeholder="Write your letter here.">${esc(wa)}</textarea>
+          <div class="trans-count"><span data-exam-count="wa">${wordCount(wa)} 词</span><span>目标约 100 词</span></div>
+        </article>
+        <article class="exam-writing-block">
+          <div class="trans-head"><span class="label">Part B · 大作文 · ${type.writingB} 分</span><span class="tag">${type.writingWords} 词</span></div>
+          <div class="prompt-box"><span class="label">题目</span><p>${esc(big ? big.kind + " · " + big.topic + "。" + big.prompt : "")}</p></div>
+          <textarea class="trans-input trans-input-lg exam-wb" data-exam-input="wb" placeholder="Write your essay here.">${esc(wb)}</textarea>
+          <div class="trans-count"><span data-exam-count="wb">${wordCount(wb)} 词</span><span>目标 ${type.writingWords} 词</span></div>
+        </article>
+      </section>`;
+  }
+
+  function examSheet(paper, answers, flags, submitted) {
+    const clozeAnswered = answers.cloze.filter(function (x) { return x != null; }).length;
+    const readingAnswered = paper.readings.reduce(function (s, id) {
+      return s + (answers.reading[String(id)] || []).filter(function (x) { return x != null; }).length;
+    }, 0);
+    const ntAnswered = answers.newtype.filter(function (x) { return x != null; }).length;
+    const answered = examAnsweredCount(paper, answers);
+    const grid = function (from, to, sec) {
+      let out = "";
+      for (let q = from; q < to; q++) {
+        const on = examAnswerAt(paper, answers, q) != null;
+        const flag = (flags || []).indexOf(q) !== -1;
+        out += `<button class="sheet-q ${on ? "on" : ""} ${flag ? "flag" : ""}" data-action="exam-jump" data-q="${q}" aria-label="第 ${q + 1} 题${on ? "，已答" : "，未答"}">${q + 1}</button>`;
+      }
+      return out;
+    };
+    const transDone = paper.translation.kind === "sentences"
+      ? answers.translationS.filter(function (x) { return String(x).trim(); }).length + " / 5 句"
+      : (String(answers.translation).trim() ? "已写 " + countChars(answers.translation) + " 字" : "未写");
+    const waDone = answers.writingA.trim() ? wordCount(answers.writingA) + " 词" : "未写";
+    const wbDone = answers.writingB.trim() ? wordCount(answers.writingB) + " 词" : "未写";
+    return `
+      <aside class="exam-sheet-col" id="examSheet">
+        <div class="exam-sheet">
+          <div class="sheet-head"><h3>答题卡</h3><span>${answered} / 45</span></div>
+          <div class="sheet-group"><div class="sheet-label">完形 <span>${clozeAnswered} / 20</span></div><div class="sheet-grid">${grid(0, 20, "cloze")}</div></div>
+          <div class="sheet-group"><div class="sheet-label">阅读 <span>${readingAnswered} / 20</span></div><div class="sheet-grid">${grid(20, 40, "reading")}</div></div>
+          <div class="sheet-group"><div class="sheet-label">新题型 <span>${ntAnswered} / 5</span></div><div class="sheet-grid five">${grid(40, 45, "newtype")}</div></div>
+          <div class="sheet-subjective">
+            <div><span>翻译</span><b data-sheet-sub="trans" class="${String(transDone).indexOf("未") === -1 ? "done" : ""}">${esc(transDone)}</b></div>
+            <div><span>小作文</span><b data-sheet-sub="wa" class="${waDone === "未写" ? "" : "done"}">${esc(waDone)}</b></div>
+            <div><span>大作文</span><b data-sheet-sub="wb" class="${wbDone === "未写" ? "" : "done"}">${esc(wbDone)}</b></div>
+          </div>
+          <div class="sheet-legend"><span><i class="lg-on"></i>已答</span><span><i class="lg-flag"></i>标记</span></div>
+          ${submitted ? "" : `<button class="btn btn-accent exam-submit-btn" data-action="exam-submit">交卷并计分</button>`}
+          <p class="mini-note">时间到会自动交卷。交卷后客观题立即出分，主观题进入自评。</p>
+          <button class="text-link muted exam-sheet-back" data-action="exam-sheet-back">回到题目</button>
+        </div>
+      </aside>`;
+  }
+
+  function examSectionTabs(paper, answers) {
+    const counts = {};
+    counts.cloze = answers.cloze.filter(function (x) { return x != null; }).length;
+    counts.reading = paper.readings.reduce(function (s, id) {
+      return s + (answers.reading[String(id)] || []).filter(function (x) { return x != null; }).length;
+    }, 0);
+    counts.newtype = answers.newtype.filter(function (x) { return x != null; }).length;
+    counts.translation = paper.translation.kind === "sentences"
+      ? answers.translationS.filter(function (x) { return String(x).trim(); }).length
+      : (String(answers.translation).trim() ? 1 : 0);
+    counts.writing = [answers.writingA, answers.writingB].filter(function (x) { return String(x).trim(); }).length;
+    const tabs = [
+      ["cloze", "完形", 20, counts.cloze],
+      ["reading", "阅读", 20, counts.reading],
+      ["newtype", "新题型", 5, counts.newtype],
+      ["translation", "翻译", 5, counts.translation],
+      ["writing", "写作", 2, counts.writing]
+    ];
+    return tabs.map(function (t) {
+      return `<button class="${ui.examSection === t[0] ? "on" : ""}" data-action="exam-section" data-sec="${t[0]}">${t[1]}<span class="n">${t[3]} / ${t[2]}</span></button>`;
+    }).join("");
+  }
+
+  function examPager() {
+    const order = ["cloze", "reading", "newtype", "translation", "writing"];
+    const i = order.indexOf(ui.examSection);
+    return `
+      <div class="exam-pager">
+        <button class="btn btn-quiet btn-sm" data-action="exam-prev" ${i <= 0 ? "disabled" : ""}>← 上一部分</button>
+        <button class="text-link muted" data-action="exam-sheet-jump">答题卡</button>
+        <button class="btn btn-quiet btn-sm" data-action="exam-next" ${i >= order.length - 1 ? "disabled" : ""}>下一部分 →</button>
+      </div>`;
+  }
+
+  function pageExamRun() {
+    const active = normalizeExamActive(state.examActive);
+    if (!active) {
+      return `${pageHead("08", "模考", "没有进行中的模考", "先选一份卷子，再从 180 分钟计时开始。")}
+        <div class="empty"><p class="mark">卷</p><p>当前没有未交卷的模考。</p><div class="actions"><a class="btn btn-solid" href="#/exam">去选卷子</a></div></div>`;
+    }
+    state.examActive = active;
+    const paper = mockPaper(active.paperId);
+    if (!paper) {
+      return `<div class="empty"><p class="mark">空</p><p>这份卷子的配置已经失效，请回到模考首页。</p><div class="actions"><a class="btn btn-solid" href="#/exam">返回</a></div></div>`;
+    }
+    const valid = ["cloze", "reading", "newtype", "translation", "writing"];
+    if (valid.indexOf(ui.examSection) === -1) ui.examSection = "cloze";
+    if (ui.examSection === "reading" && ui.examReading >= paper.readings.length) ui.examReading = 0;
+    if (ui.examSection === "reading") {
+      const rid = paper.readings[ui.examReading];
+      const startQ = 20 + ui.examReading * 5;
+      if (active.answers.reading[String(rid)] && active.answers.reading[String(rid)].some(function (x, i) {
+        return x == null && (active.flags || []).indexOf(startQ + i) !== -1;
+      })) {
+        // flags are independent of answers; nothing to do, kept for readability
+      }
+    }
+    const answered = examAnsweredCount(paper, active.answers);
+    const remain = examRemaining();
+    const urgent = remain <= 300;
+    const body = ui.examSection === "cloze" ? examClozeSection(paper, active.answers, active.flags)
+      : ui.examSection === "reading" ? examReadingSection(paper, active.answers, active.flags)
+      : ui.examSection === "newtype" ? examNewtypeSection(paper, active.answers, active.flags)
+      : ui.examSection === "translation" ? examTranslationSection(paper, active.answers)
+      : examWritingSection(paper, active.answers);
+
+    return `
+      <div class="exam-run-head">
+        <div class="exam-bar">
+          <div class="exam-bar-id">
+            <span class="tag hot">${esc(mockType(paper.type).label)}</span>
+            <div><b>${esc(paper.label)} · ${esc(paper.name)}</b><span>${esc(paper.note)}</span></div>
+          </div>
+          <div class="exam-clock ${urgent ? "urgent" : ""}" id="examClock" aria-label="剩余时间">${examClock(remain)}</div>
+          <div class="exam-bar-actions">
+            <span class="exam-progress" id="examAnswered">已答 ${answered} / 45</span>
+            <button class="text-link muted exam-sheet-link" data-action="exam-sheet-jump">答题卡</button>
+            <button class="text-link muted exam-leave-link" data-action="exam-leave" aria-label="暂离考场，计时继续">暂离</button>
+            <button class="btn btn-sm btn-accent" data-action="exam-submit">交卷</button>
+          </div>
+        </div>
+        <div class="subnav exam-subnav">${examSectionTabs(paper, active.answers)}</div>
+      </div>
+      <div class="exam-layout">
+        <div class="exam-content">
+          ${body}
+          ${examPager()}
+        </div>
+        ${examSheet(paper, active.answers, active.flags, false)}
+      </div>`;
+  }
+
+  function examSelfWritingBlock(rec, paper, kind) {
+    const type = mockType(paper.type);
+    const isA = kind === "wa";
+    const item = isA ? (window.WRITING.small || [])[paper.writing.small] : (window.WRITING.big || [])[paper.writing.big];
+    const text = isA ? rec.answers.writingA : rec.answers.writingB;
+    const target = isA ? "约 100 词" : type.writingWords + " 词";
+    const dims = isA ? WRITING_A_DIMS : writingBDims(paper);
+    const src = rec.self[kind] || {};
+    const max = isA ? type.writingA : type.writingB;
+    const got = dims.reduce(function (s, d) { return s + Math.max(0, Math.min(d.max, Number(src[d.key]) || 0)); }, 0);
+    const rows = dims.map(function (d) {
+      const cur = Math.max(0, Math.min(d.max, Number(src[d.key]) || 0));
+      let buttons = "";
+      for (let n = 0; n <= d.max; n++) {
+        buttons += `<button class="rubric-score ${cur === n ? "on" : ""}" data-action="exam-self-writing" data-id="${esc(rec.id)}" data-kind="${kind}" data-dim="${d.key}" data-score="${n}" aria-label="${esc(d.label)} ${n} 分">${n}</button>`;
+      }
+      return `<div class="rubric-row">
+        <div class="rubric-copy"><b>${esc(d.label)}</b><span>${esc(d.hint)}</span></div>
+        <div class="rubric-scores">${buttons}</div>
+        <span class="rubric-max">${cur} / ${d.max}</span>
+      </div>`;
+    }).join("");
+    const sample = item ? String(item.sample).split(/\n{2,}/).map(function (p) { return `<p>${esc(p)}</p>`; }).join("") : "";
+    const notes = item && item.notes ? item.notes.map(function (n) { return `<li>${esc(n)}</li>`; }).join("") : "";
+    return `
+      <article class="exam-self-writing">
+        <div class="trans-head">
+          <span class="label">${isA ? "Part A · 小作文" : "Part B · 大作文"} · ${max} 分</span>
+          <span class="tag">${wordCount(text)} 词 · 目标 ${target}</span>
+        </div>
+        <div class="prompt-box"><span class="label">题目</span><p>${esc(item ? (isA ? item.scene : item.kind + " · " + item.topic + "。" + item.prompt) : "")}</p></div>
+        <div class="exam-user-text">${text.trim() ? esc(text) : "<span class=\"muted\">这次没有写这一篇。</span>"}</div>
+        <div class="rubric-box">
+          <div class="rubric-head"><h3>自评维度</h3><span>自评 ${got} / ${max}</span></div>
+          ${rows}
+        </div>
+        <details class="acc exam-sample-acc">
+          <summary><span class="acc-no">范</span><span class="acc-title">对照范文与注意点</span><span class="acc-sub">自评后再看</span><span class="acc-plus"></span></summary>
+          <div class="acc-body">
+            <div class="sample"><div class="sample-en">${sample}</div>${notes ? `<div class="sample-note"><ul class="sample-notes">${notes}</ul></div>` : ""}</div>
+          </div>
+        </details>
+      </article>`;
+  }
+
+  function examSelfTranslation(rec, paper) {
+    const type = mockType(paper.type);
+    const self = rec.self;
+    if (paper.translation.kind === "sentences") {
+      const ids = paper.translation.ids || [];
+      const items = ids.map(function (id, i) {
+        const s = (window.TRANSLATIONS.sentences || []).find(function (x) { return x.id === Number(id); });
+        const user = rec.answers.translationS[i] || "";
+        const score = Math.max(0, Math.min(2, Number(self.translationSentences[i]) || 0));
+        const pick = [0, 1, 2].map(function (n) {
+          return `<button class="rubric-score ${score === n ? "on" : ""}" data-action="exam-self-sentence" data-id="${esc(rec.id)}" data-i="${i}" data-score="${n}">${n}</button>`;
+        }).join("");
+        return `
+          <article class="exam-self-trans-sentence">
+            <div class="trans-head"><span class="label">句子 ${i + 1}</span><span class="tag">2 分</span></div>
+            <p class="trans-en">${esc(s ? s.en : "")}</p>
+            <div class="exam-user-text">${user.trim() ? esc(user) : "<span class=\"muted\">未作答。</span>"}</div>
+            <div class="self-ref"><b>参考</b><p>${esc(s ? s.ref : "")}</p></div>
+            <div class="rubric-inline"><span>逐句自评</span>${pick}<em>${score} / 2</em></div>
+          </article>`;
+      }).join("");
+      return `
+        <div class="exam-self-block">
+          <div class="self-block-head"><h3>翻译自评 · ${type.translation} 分</h3><span>逐句给分：0 = 意思错或漏译，1 = 基本达意但有明显问题，2 = 准确通顺</span></div>
+          ${items}
+        </div>`;
+    }
+    const entry = transEntryByKey("p" + paper.translation.id);
+    const value = rec.answers.translation || "";
+    const points = (entry && entry.points) || [];
+    const checks = points.map(function (p, i) {
+      const on = !!self.translationPoints[i];
+      return `<li><button class="point-check ${on ? "on" : ""}" data-action="exam-trans-point" data-id="${esc(rec.id)}" data-i="${i}" aria-pressed="${on}"><i>${on ? "✓" : ""}</i><span>${esc(p)}</span></button></li>`;
+    }).join("");
+    const checked = self.translationPoints.filter(Boolean).length;
+    const score = Math.round(checked / Math.max(1, points.length) * type.translation * 2) / 2;
+    return `
+      <div class="exam-self-block">
+        <div class="self-block-head"><h3>翻译自评 · ${type.translation} 分</h3><span>对照参考译文，逐条勾选真正译出的采分点</span></div>
+        <div class="prompt-box"><span class="label">你的译文</span><p class="exam-user-text inline">${value.trim() ? esc(value) : "<span class=\"muted\">未作答。</span>"}</p></div>
+        <div class="self-ref"><b>参考译文</b><p>${esc(entry ? entry.ref : "")}</p></div>
+        <ul class="point-list">${checks}</ul>
+        <p class="self-score-line">已勾选 <b>${checked}</b> / ${points.length} 个采分点 · 自评 <b>${examScoreText(score)}</b> / ${type.translation} 分</p>
+      </div>`;
+  }
+
+  function examSelfPanel(rec, paper) {
+    const selfScore = examSelfScore(rec, paper);
+    const type = mockType(paper.type);
+    return `
+      <section class="section exam-self-section" id="examSelf">
+        <div class="section-head">
+          <h2>主观题自评</h2>
+          <span class="section-note">${selfScore.subjective} / 40 分${rec.self.done ? " · 已完成" : " · 未完成"}</span>
+        </div>
+        <p class="section-sub">客观题机器合分，主观题必须自己面对。先对照参考与维度打分，再点“完成自评”锁定本次成绩；之后仍可回来修改。</p>
+        ${examSelfTranslation(rec, paper)}
+        ${examSelfWritingBlock(rec, paper, "wa")}
+        ${examSelfWritingBlock(rec, paper, "wb")}
+        <div class="exam-self-finish">
+          <div><b>主观题合计 ${selfScore.subjective} / 40</b><span>翻译 ${examScoreText(selfScore.translation)} / ${type.translation} · 小作文 ${selfScore.writingA} / ${type.writingA} · 大作文 ${selfScore.writingB} / ${type.writingB}</span></div>
+          ${rec.self.done ? `<span class="tag green">已完成自评</span>` : `<button class="btn btn-solid" data-action="exam-self-done" data-id="${esc(rec.id)}">完成自评并记入成绩</button>`}
+        </div>
+      </section>`;
+  }
+
+  function examObjectiveReview(rec, paper) {
+    const tabs = [["cloze", "完形"], ["reading", "阅读"], ["newtype", "新题型"]];
+    const current = tabs.some(function (t) { return t[0] === ui.examResultSection; }) ? ui.examResultSection : "cloze";
+    ui.examResultSection = current;
+    const range = current === "cloze" ? [0, 20] : current === "reading" ? [20, 40] : [40, 45];
+    const all = [];
+    for (let q = range[0]; q < range[1]; q++) all.push(q);
+    const isRight = function (q) {
+      const picked = examAnswerAt(paper, rec.answers, q);
+      const correct = examCorrectAt(paper, q);
+      return picked != null && String(picked) === String(correct);
+    };
+    const wrong = all.filter(function (q) { return !isRight(q); });
+    const list = ui.examReviewAll ? all : wrong;
+    const tabButtons = tabs.map(function (t) {
+      const rang = t[0] === "cloze" ? [0, 20] : t[0] === "reading" ? [20, 40] : [40, 45];
+      let right = 0;
+      for (let q = rang[0]; q < rang[1]; q++) if (isRight(q)) right++;
+      return `<button class="chip ${current === t[0] ? "on" : ""}" data-action="exam-review-section" data-sec="${t[0]}">${t[1]}<span class="n">${right} / ${rang[1] - rang[0]}</span></button>`;
+    }).join("");
+    const blocks = list.map(function (q) {
+      return examQuestionBlock(paper, rec.answers, q, true, rec.flags);
+    }).join("");
+    return `
+      <section class="section exam-review-section">
+        <div class="section-head"><h2>客观题解析</h2><span class="section-note">${wrong.length ? wrong.length + " 道需要回看" : "这部分全部正确"}</span></div>
+        <div class="toolbar exam-review-toolbar">
+          <div class="chips">${tabButtons}</div>
+          <button class="text-link muted" data-action="exam-review-all">${ui.examReviewAll ? "只看错题" : "显示全部题目"}</button>
+        </div>
+        ${list.length ? `<div class="exam-question-list review-list">${blocks}</div>` : `<div class="exam-all-right"><b>这部分全对。</b><span>可以切到其他部分，或回看主观题自评。</span></div>`}
+      </section>`;
+  }
+
+  function pageExamResult(id) {
+    const rec = state.exams.find(function (r) { return String(r.id) === String(id); });
+    if (!rec) {
+      return `${pageHead("08", "模考", "没有这份成绩", "记录可能已被清空，或者链接不完整。")}
+        <div class="empty"><p class="mark">空</p><p>找不到这次模考记录。</p><div class="actions"><a class="btn btn-solid" href="#/exam">回到模考</a></div></div>`;
+    }
+    const paper = mockPaper(rec.paperId);
+    if (!paper) {
+      return `${pageHead("08", "模考", "试卷配置失效", "这份卷子的题目配置已经不在当前版本中。")}`;
+    }
+    const type = mockType(paper.type);
+    examRecalc(rec);
+    const selfScore = examSelfScore(rec, paper);
+    const grade = examGrade(paper, rec.answers);
+    const total = rec.self.done ? rec.total : rec.objective;
+    const passed = total >= 60;
+    const usedSec = Number(rec.usedSec) || 0;
+    const transDoneText = paper.translation.kind === "sentences"
+      ? rec.answers.translationS.filter(function (x) { return String(x).trim(); }).length + " / 5 句"
+      : (String(rec.answers.translation).trim() ? "已写 " + countChars(rec.answers.translation) + " 字" : "未写");
+    const sectionRows = [
+      ["完形填空", "正答 " + grade.cloze.right + " / 20", grade.cloze.score + " / 10"],
+      ["阅读理解", "正答 " + grade.reading.right + " / 20", grade.reading.score + " / 40"],
+      ["新题型", "正答 " + grade.newtype.right + " / 5", grade.newtype.score + " / 10"],
+      ["翻译", transDoneText, examScoreText(selfScore.translation) + " / " + type.translation],
+      ["小作文", wordCount(rec.answers.writingA) + " 词", selfScore.writingA + " / " + type.writingA],
+      ["大作文", wordCount(rec.answers.writingB) + " 词", selfScore.writingB + " / " + type.writingB]
+    ].map(function (row) {
+      return `<tr><td>${esc(row[0])}</td><td class="num">${esc(row[1])}</td><td class="num"><b>${esc(row[2])}</b></td></tr>`;
+    }).join("");
+
+    return `
+      ${pageHead("08", "模考", "模考成绩", examFullLabel(paper) + " · " + examDateText(rec.submittedAt) + " · 用时 " + mmss(usedSec))}
+      <section class="exam-result-banner ${rec.self.done ? (passed ? "pass" : "fail") : "pending"}">
+        <div class="exam-result-main">
+          <div class="exam-result-score"><span class="k">${rec.self.done ? "总分" : "客观题"}</span><b>${examScoreText(total)}</b><em>/ ${rec.self.done ? 100 : 60}</em></div>
+          <div class="exam-result-copy">
+            <p class="eyebrow">${esc(mockType(paper.type).label)} · ${esc(paper.label)} ${esc(paper.name)}</p>
+            <h2>${rec.self.done ? (total >= 80 ? "分数已经站上高分段，接下来拼的是稳定。" : (total >= 60 ? "过线不代表稳，最弱项才决定上限。" : "先把能拿的分拿稳，再谈技巧。")) : "客观题已出分，主观题还等你自评。"}</h2>
+            <p>客观 ${examScoreText(rec.objective)} / 60 · 主观 ${examScoreText(rec.subjective)} / 40 · ${rec.self.done ? "自评已完成" : "自评未完成"}</p>
+          </div>
+        </div>
+        <div class="exam-result-actions">
+          <a class="btn btn-sm btn-quiet" href="#/exam">模考首页</a>
+          ${rec.self.done ? "" : `<button class="btn btn-sm btn-solid" data-action="exam-self-jump">开始自评</button>`}
+          <button class="btn btn-sm ${rec.self.done ? "btn-solid" : "btn-quiet"}" data-action="exam-retake" data-id="${esc(paper.id)}">再考一次</button>
+        </div>
+      </section>
+
+      <div class="exam-result-grid">
+        <section>
+          <div class="section-head"><h2>分项得分</h2><span class="section-note">客观题自动合分，主观题按自评</span></div>
+          <div class="table-wrap"><table class="data exam-score-table"><thead><tr><th>部分</th><th>作答情况</th><th>得分</th></tr></thead><tbody>${sectionRows}</tbody></table></div>
+          <p class="mini-note">${rec.self.done ? "成绩已记入本机模考记录。" : "完成下方主观题自评后，总分才会记入模考记录。"}</p>
+        </section>
+        <aside class="exam-result-note">
+          <h3>这次先看三件事</h3>
+          <ol>
+            <li><b>错题原因</b>是没定位到、看错选项，还是时间不够。</li>
+            <li><b>主观题</b>对照采分点和维度，不凭感觉给分。</li>
+            <li><b>下一次</b>只改一个最影响分数的问题。</li>
+          </ol>
+          <a class="text-link" href="#/me/mistakes">去错题本复盘 →</a>
+        </aside>
+      </div>
+
+      ${examSelfPanel(rec, paper)}
+      ${examObjectiveReview(rec, paper)}`;
+  }
+
+  function createExamRecord(active) {
+    const paper = mockPaper(active.paperId);
+    if (!paper) return null;
+    const now = Date.now();
+    const rec = {
+      id: "x" + now.toString(36) + Math.random().toString(36).slice(2, 6),
+      paperId: paper.id,
+      startedAt: active.startedAt,
+      submittedAt: now,
+      usedSec: Math.max(0, Math.min(EXAM_TIME, Math.round((now - active.startedAt) / 1000))),
+      answers: normalizeExamAnswers(JSON.parse(JSON.stringify(active.answers)), paper),
+      flags: (active.flags || []).slice(),
+      self: emptyExamSelf()
+    };
+    examRecalc(rec);
+    return rec;
+  }
+
+  function finishExam(auto) {
+    if (!state.examActive || ui.examSubmitting) return;
+    const paper = mockPaper(state.examActive.paperId);
+    if (!paper) { state.examActive = null; save(); return; }
+    const unanswered = EXAM_OBJECTIVE_COUNT - examAnsweredCount(paper, state.examActive.answers);
+    if (!auto && examRemaining() > 0 && unanswered > 0) {
+      if (!window.confirm("还有 " + unanswered + " 道客观题未答，确定现在交卷？")) return;
+    }
+    ui.examSubmitting = true;
+    const rec = createExamRecord(state.examActive);
+    if (!rec) { ui.examSubmitting = false; return; }
+    state.exams.unshift(rec);
+    state.exams = state.exams.slice(0, 30);
+    state.examActive = null;
+    save();
+    ui.examSubmitting = false;
+    toast(auto ? "时间到，已自动交卷" : "已交卷 · 客观题 " + examScoreText(rec.objective) + " / 60");
+    if (getRoute().name === "exam") location.hash = "#/exam/result/" + rec.id;
+    else render();
+  }
+
+  function startExam(id) {
+    const paper = mockPaper(id);
+    if (!paper) { toast("这份卷子暂时不可用"); return; }
+    const old = normalizeExamActive(state.examActive);
+    if (old) {
+      if (examRemaining() > 0) { toast("已有未交卷的模考，先完成或放弃它"); return; }
+      const rec = createExamRecord(old);
+      if (rec) {
+        state.exams.unshift(rec);
+        state.exams = state.exams.slice(0, 30);
+      }
+      state.examActive = null;
+      save();
+      toast("上次模考已超时，成绩已记入记录");
+    }
+    const now = Date.now();
+    state.examActive = {
+      paperId: paper.id,
+      startedAt: now,
+      endAt: now + EXAM_TIME * 1000,
+      answers: emptyExamAnswers(paper),
+      flags: [],
+      startedLabel: examDateText(now)
+    };
+    state.examType = paper.type;
+    ui.examSection = "cloze";
+    ui.examReading = 0;
+    ui.examJumpQ = null;
+    ui.examReviewAll = false;
+    ui.examResultSection = "cloze";
+    save();
+    location.hash = "#/exam/run";
+    toast("计时开始 · 180 分钟");
+  }
+
+  function examTick() {
+    if (!state.examActive) return;
+    const remain = examRemaining();
+    const el = document.getElementById("examClock");
+    if (el) {
+      el.textContent = examClock(remain);
+      el.classList.toggle("urgent", remain <= 300);
+    }
+    if (remain <= 0 && !ui.examSubmitting) {
+      finishExam(true);
+    }
+  }
+
+  /* ------------------------------------------------------------------
      plan
   ------------------------------------------------------------------ */
 
@@ -3420,7 +4757,7 @@
     }).join("");
 
     return `
-      ${pageHead("08", "真题与规划", "真题与规划", "规划不是把每天排满，而是知道每个阶段该解决什么问题。真题要反复做，但每一遍要有不同任务。")}
+      ${pageHead("09", "真题与规划", "真题与规划", "规划不是把每天排满，而是知道每个阶段该解决什么问题。真题要反复做，但每一遍要有不同任务。")}
       <div class="plan-hero">
         <div>
           <p class="big">${d}<small>天</small></p>
@@ -3484,7 +4821,7 @@
     }
     const tab = ui.meTab;
     return `
-      ${pageHead("09", "我的记录", "我的记录", "记录不是为了好看。生词要回看，错题要重做，时间要能解释清楚。")}
+      ${pageHead("10", "我的记录", "我的记录", "记录不是为了好看。生词要回看，错题要重做，时间要能解释清楚。")}
       <div class="stat-strip">
         <div class="stat"><p class="k">连续学习</p><p class="v">${streakDays()}<small>天</small></p><p class="s">今天也算在内</p></div>
         <div class="stat"><p class="k">累计专注</p><p class="v">${totalMinutes()}<small>分钟</small></p><p class="s">完整专注时段</p></div>
@@ -3930,6 +5267,177 @@
         rerender();
         break;
       }
+      case "exam-type":
+        state.examType = data.type === "en1" ? "en1" : "en2";
+        save();
+        render();
+        break;
+      case "exam-start":
+        startExam(data.id);
+        break;
+      case "exam-discard": {
+        const paper = mockPaper(data.id);
+        if (!window.confirm("放弃本次模考？当前答案不会记入成绩。")) break;
+        state.examActive = null;
+        save();
+        render();
+        toast("已放弃本次模考" + (paper ? "" : ""));
+        break;
+      }
+      case "exam-section":
+        ui.examSection = data.sec;
+        render();
+        break;
+      case "exam-reading":
+        ui.examSection = "reading";
+        ui.examReading = Number(data.ri) || 0;
+        ui.examJumpQ = 20 + ui.examReading * 5;
+        render();
+        break;
+      case "exam-jump": {
+        const q = Number(data.q);
+        if (!Number.isInteger(q) || q < 0 || q >= EXAM_OBJECTIVE_COUNT) break;
+        const info = examQInfo(q);
+        ui.examSection = info.sec;
+        if (info.sec === "reading") ui.examReading = info.ri;
+        ui.examJumpQ = q;
+        render();
+        break;
+      }
+      case "exam-sheet-jump": {
+        const sheet = document.getElementById("examSheet");
+        if (sheet) sheet.scrollIntoView({ behavior: "smooth", block: "start" });
+        break;
+      }
+      case "exam-sheet-back": {
+        const content = document.querySelector(".exam-content");
+        if (content) content.scrollIntoView({ behavior: "smooth", block: "start" });
+        break;
+      }
+      case "exam-leave":
+        location.hash = "#/exam";
+        toast("已暂离考场，计时仍在继续");
+        break;
+      case "exam-self-jump": {
+        const el = document.getElementById("examSelf");
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        break;
+      }
+      case "exam-pick": {
+        const active = state.examActive;
+        const paper = active && mockPaper(active.paperId);
+        if (!paper) break;
+        const q = Number(data.q);
+        const oi = Number(data.oi);
+        const info = examQInfo(q);
+        if (info.sec === "newtype") break;
+        examSetAnswer(paper, active.answers, q, oi);
+        touch();
+        save();
+        rerender();
+        break;
+      }
+      case "exam-flag": {
+        const active = state.examActive;
+        if (!active) break;
+        const q = Number(data.q);
+        if (!Number.isInteger(q) || q < 0 || q >= EXAM_OBJECTIVE_COUNT) break;
+        const i = active.flags.indexOf(q);
+        if (i === -1) active.flags.push(q);
+        else active.flags.splice(i, 1);
+        save();
+        rerender();
+        break;
+      }
+      case "exam-npick": {
+        const active = state.examActive;
+        const paper = active && mockPaper(active.paperId);
+        if (!paper) break;
+        const nt = examNewtypeSet(paper);
+        if (!nt) break;
+        const i = Number(data.i);
+        if (!Number.isInteger(i) || i < 0 || i >= 5) break;
+        const val = nt.kind === "seven" ? Number(data.val) : String(data.val);
+        active.answers.newtype.forEach(function (x, j) {
+          if (j !== i && String(x) === String(val)) active.answers.newtype[j] = null;
+        });
+        active.answers.newtype[i] = val;
+        touch();
+        save();
+        rerender();
+        break;
+      }
+      case "exam-prev":
+      case "exam-next": {
+        const order = ["cloze", "reading", "newtype", "translation", "writing"];
+        const cur = order.indexOf(ui.examSection);
+        const next = cur + (action === "exam-next" ? 1 : -1);
+        if (next < 0 || next >= order.length) break;
+        ui.examSection = order[next];
+        render();
+        break;
+      }
+      case "exam-submit":
+        finishExam(false);
+        break;
+      case "exam-review-section":
+        ui.examResultSection = data.sec;
+        rerender();
+        break;
+      case "exam-review-all":
+        ui.examReviewAll = !ui.examReviewAll;
+        rerender();
+        break;
+      case "exam-trans-point": {
+        const rec = state.exams.find(function (r) { return String(r.id) === String(data.id); });
+        if (!rec) break;
+        const i = Number(data.i);
+        if (!rec.self.translationPoints[i] && rec.self.translationPoints.filter(Boolean).length >= 5) break;
+        rec.self.translationPoints[i] = !rec.self.translationPoints[i];
+        examRecalc(rec);
+        save();
+        rerender();
+        break;
+      }
+      case "exam-self-sentence": {
+        const rec = state.exams.find(function (r) { return String(r.id) === String(data.id); });
+        if (!rec) break;
+        const i = Number(data.i);
+        if (!Number.isInteger(i) || i < 0 || i >= 5) break;
+        rec.self.translationSentences[i] = Math.max(0, Math.min(2, Number(data.score) || 0));
+        examRecalc(rec);
+        save();
+        rerender();
+        break;
+      }
+      case "exam-self-writing": {
+        const rec = state.exams.find(function (r) { return String(r.id) === String(data.id); });
+        if (!rec) break;
+        const kind = data.kind === "wb" ? "writingB" : "writingA";
+        const paper = mockPaper(rec.paperId);
+        if (!paper) break;
+        const dims = kind === "writingA" ? WRITING_A_DIMS : writingBDims(paper);
+        const dim = dims.find(function (d) { return d.key === data.dim; });
+        if (!dim) break;
+        rec.self[kind][data.dim] = Math.max(0, Math.min(dim.max, Number(data.score) || 0));
+        examRecalc(rec);
+        save();
+        rerender();
+        break;
+      }
+      case "exam-self-done": {
+        const rec = state.exams.find(function (r) { return String(r.id) === String(data.id); });
+        if (!rec) break;
+        rec.self.done = true;
+        examRecalc(rec);
+        save();
+        rerender();
+        toast("自评已完成 · 总分 " + examScoreText(rec.total));
+        break;
+      }
+      case "exam-retake":
+        startExam(data.id);
+        break;
       case "set-tag": {
         ui.vocabTag = data.tag;
         ui.vocabLimit = 60;
@@ -4552,6 +6060,36 @@
         ui.transTab = data.tab;
         render();
         break;
+      case "trans-point": {
+        const key = data.key;
+        const entry = transEntryByKey(key);
+        if (!entry) break;
+        const total = (entry.points || []).length;
+        const i = Number(data.i);
+        if (!Number.isInteger(i) || i < 0 || i >= total) break;
+        const arr = Array.isArray(state.transSelf[key]) ? state.transSelf[key].slice() : [];
+        while (arr.length < total) arr.push(false);
+        arr[i] = !arr[i];
+        state.transSelf[key] = arr;
+        save();
+        updateTransSelfDom(key);
+        break;
+      }
+      case "draft-self": {
+        const key = data.key;
+        if (!key) break;
+        const kind = key.indexOf("small-") === 0 ? "small" : "big";
+        const dims = draftSelfDims(kind);
+        const dim = dims.find(function (d) { return d.key === data.dim; });
+        if (!dim) break;
+        const src = state.draftSelf[key] && typeof state.draftSelf[key] === "object" ? state.draftSelf[key] : {};
+        src[data.dim] = Math.max(0, Math.min(dim.max, Number(data.score) || 0));
+        state.draftSelf[key] = src;
+        save();
+        updateDraftSelfDom(key);
+        markTask(3, true);
+        break;
+      }
       case "trans-passage": {
         const id = Number(data.id);
         if (id) { ui.transPassage = id; rerender(); }
@@ -4792,6 +6330,53 @@
         return;
       }
 
+      if (t.hasAttribute("data-exam-input")) {
+        const active = state.examActive;
+        if (!active) return;
+        const key = t.getAttribute("data-exam-input");
+        if (key === "trans") {
+          active.answers.translation = t.value;
+          save();
+          const counter = document.querySelector('[data-exam-count="trans"]');
+          if (counter) counter.textContent = "已写 " + countChars(t.value) + " 字";
+          const sheet = document.querySelector('[data-sheet-sub="trans"]');
+          if (sheet) {
+            sheet.textContent = t.value.trim() ? "已写 " + countChars(t.value) + " 字" : "未写";
+            sheet.classList.toggle("done", !!t.value.trim());
+          }
+          return;
+        }
+        if (/^trans-s\d$/.test(key)) {
+          const i = Number(key.slice(-1));
+          active.answers.translationS[i] = t.value;
+          save();
+          const counter = document.querySelector('[data-exam-count="' + key + '"]');
+          if (counter) counter.textContent = "已写 " + countChars(t.value) + " 字";
+          const sheet = document.querySelector('[data-sheet-sub="trans"]');
+          if (sheet) {
+            const n = active.answers.translationS.filter(function (x) { return String(x).trim(); }).length;
+            sheet.textContent = n + " / 5 句";
+            sheet.classList.toggle("done", n > 0);
+          }
+          return;
+        }
+        if (key === "wa" || key === "wb") {
+          if (key === "wa") active.answers.writingA = t.value;
+          else active.answers.writingB = t.value;
+          save();
+          const counter = document.querySelector('[data-exam-count="' + key + '"]');
+          if (counter) counter.textContent = wordCount(t.value) + " 词";
+          const sheet = document.querySelector('[data-sheet-sub="' + key + '"]');
+          if (sheet) {
+            sheet.textContent = t.value.trim() ? wordCount(t.value) + " 词" : "未写";
+            sheet.classList.toggle("done", !!t.value.trim());
+          }
+          if (wordCount(t.value) >= 50) markTask(3, true);
+          return;
+        }
+        return;
+      }
+
       if (t.hasAttribute("data-trans-input")) {
         const key = t.getAttribute("data-trans-input");
         state.translations[key] = t.value;
@@ -4977,6 +6562,7 @@
   registerOfflineCache();
   setInterval(timerTick, 250);
   setInterval(readingTick, 1000);
+  setInterval(examTick, 500);
   render();
 
 })();

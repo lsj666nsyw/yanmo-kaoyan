@@ -15,6 +15,7 @@ const FILES = [
   "newtypes.js", "newtypes-more.js", "newtypes-extra.js",
   "translation.js", "translation-extra.js", "translation-more.js", "translation-extra2.js", "translation-passages.js",
   "writing.js", "writing-more.js", "writing-phrases.js",
+  "mock-exams.js", "mock-fixes.js",
   "plan.js"
 ];
 

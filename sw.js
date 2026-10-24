@@ -1,7 +1,7 @@
 /* 研墨 · 考研英语 — 离线缓存
    单文件版本身可离线打开；这里让在线版在首次加载后也能断网重开。
    更新部署时请把 CACHE 的版本号改掉（例如日期 +1），否则浏览器会继续用旧缓存。 */
-const CACHE = "yanmo-kaoyan-v1-20261024";
+const CACHE = "yanmo-kaoyan-v1-20261024-3";
 const CORE = [
   "./",
   "./index.html",
