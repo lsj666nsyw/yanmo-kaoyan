@@ -33,6 +33,7 @@
 
   const TAG_OPTIONS = [
     { v: "全部", l: "全部" },
+    { v: "待复习", l: "待复习" },
     { v: "精讲", l: "精讲" },
     { v: "高频", l: "高频" },
     { v: "核心", l: "核心" },
@@ -852,8 +853,20 @@
     return true;
   }
 
+  // 朗读前的文本清洗：词条里的 “affect / effect”“and/or” 这类斜杠是给人看的，
+  // 交给语音引擎会被读成 “slash”。统一换成逗号停顿，两个词仍分得开。
+  // 全角斜杠、分数线也一并处理；其余标点保留，避免改变原句语气。
+  function speechText(text) {
+    return String(text || "")
+      .replace(/\s*[\/／⁄]\s*/g, ", ")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\s*,\s*,\s*/g, ", ")
+      .replace(/\s+([,.!?;:])/g, "$1")
+      .trim();
+  }
+
   function speak(text) {
-    text = String(text || "").trim();
+    text = speechText(text);
     if (!text) return;
     // 新的一次朗读先掐掉上一段在线音频，避免两段声音叠在一起
     if (onlineAudio) { try { onlineAudio.pause(); } catch (err) {} onlineAudio = null; }
@@ -932,6 +945,7 @@
       ttsRate: "normal",
       cardAutoplay: false,
       words: {},
+      srs: {},
       notebook: [],
       mistakes: [],
       days: {},
@@ -965,6 +979,32 @@
       const total = Math.max(0, Math.floor(Number(src.total) || 0));
       const right = Math.min(total, Math.max(0, Math.floor(Number(src.right) || 0)));
       if (total) merged.trapStats[type] = { total: total, right: right };
+    });
+    // 间隔复习：老版本只存 known/fuzzy，没有到期时间。这里给旧标记补一条
+    // “今天到期”，第一次复习后就会按 1/2/4/7/15/30 天进入正常节奏。
+    merged.srs = {};
+    const rawSrs = plain(raw.srs) ? raw.srs : {};
+    Object.keys(rawSrs).forEach(function (w) {
+      const src = rawSrs[w];
+      if (!plain(src)) return;
+      const box = Math.min(6, Math.max(0, Math.floor(Number(src.box) || 0)));
+      const due = /^\d{4}-\d{2}-\d{2}$/.test(src.due) ? src.due : todayKey();
+      merged.srs[w] = {
+        box: box,
+        due: due,
+        last: /^\d{4}-\d{2}-\d{2}$/.test(src.last) ? src.last : "",
+        seen: Math.max(0, Math.floor(Number(src.seen) || 0)),
+        ok: Math.max(0, Math.floor(Number(src.ok) || 0))
+      };
+    });
+    Object.keys(merged.words).forEach(function (w) {
+      if (merged.srs[w] || !WORD_MAP.has(w)) return;
+      if (merged.words[w] !== "known" && merged.words[w] !== "fuzzy") return;
+      merged.srs[w] = { box: 0, due: todayKey(), last: "", seen: 0, ok: 0 };
+    });
+    merged.notebook.forEach(function (w) {
+      if (merged.srs[w] || !WORD_MAP.has(w)) return;
+      merged.srs[w] = { box: 0, due: todayKey(), last: "", seen: 0, ok: 0 };
     });
     merged.clozes = clozeSets().map(function (_, i) {
       const src = Array.isArray(raw.clozes) && plain(raw.clozes[i])
@@ -1097,6 +1137,61 @@
     return state.notebook.map(function (w) { return WORD_MAP.get(w); }).filter(Boolean);
   }
 
+  /* 间隔复习（Leitner 简化版）：认识一次升一档，模糊回到底档明天再见，
+     不认识留在今天。档位对应 1 / 2 / 4 / 7 / 15 / 30 天，足够覆盖考研周期，
+     又不会像 SM-2 那样让参数和界面变得难懂。 */
+  const SRS_INTERVALS = [1, 2, 4, 7, 15, 30];
+
+  function srsOf(w) {
+    return state.srs && state.srs[w] ? state.srs[w] : null;
+  }
+
+  function srsDue(w) {
+    const e = srsOf(w);
+    return !!(e && e.due && e.due <= todayKey());
+  }
+
+  function dueWords() {
+    return ALL_WORDS.filter(function (w) { return srsDue(w.w); }).sort(function (a, b) {
+      const ea = srsOf(a.w), eb = srsOf(b.w);
+      return String(ea.due).localeCompare(String(eb.due))
+        || (Number(ea.box) || 0) - (Number(eb.box) || 0)
+        || a.w.localeCompare(b.w);
+    });
+  }
+
+  function dueCount() {
+    return dueWords().length;
+  }
+
+  function srsNextText(w) {
+    const e = srsOf(w);
+    if (!e || !e.due) return "";
+    const d = daysUntil(e.due);
+    if (d <= 0) return "今天到期";
+    if (d === 1) return "明天复习";
+    return d + " 天后复习";
+  }
+
+  function srsGrade(w, status) {
+    if (!state.srs) state.srs = {};
+    const e = state.srs[w] || { box: 0, due: todayKey(), last: "", seen: 0, ok: 0 };
+    e.seen = (Number(e.seen) || 0) + 1;
+    e.last = todayKey();
+    if (status === "known") {
+      e.ok = (Number(e.ok) || 0) + 1;
+      e.box = Math.min(SRS_INTERVALS.length, (Number(e.box) || 0) + 1);
+      e.due = ymd(addDays(new Date(), SRS_INTERVALS[e.box - 1]));
+    } else if (status === "fuzzy") {
+      e.box = 0;
+      e.due = ymd(addDays(new Date(), 1));
+    } else {
+      e.box = 0;
+      e.due = todayKey();
+    }
+    state.srs[w] = e;
+  }
+
   function wordStatus(w) {
     if (state.words[w] === "known") return { key: "known", label: "已掌握", cls: "known" };
     if (state.words[w] === "fuzzy") return { key: "fuzzy", label: "待巩固", cls: "fuzzy" };
@@ -1105,8 +1200,12 @@
   }
 
   function setWordStatus(w, status) {
-    if (status) state.words[w] = status;
-    else delete state.words[w];
+    if (status) {
+      state.words[w] = status;
+      srsGrade(w, status);
+    } else {
+      delete state.words[w];
+    }
     if (status === "known") {
       state.notebook = state.notebook.filter(function (x) { return x !== w; });
     } else if (status === "new" || status === "fuzzy") {
@@ -1119,6 +1218,7 @@
     const i = state.notebook.indexOf(w);
     if (i === -1) {
       state.notebook.unshift(w);
+      if (!state.srs[w]) state.srs[w] = { box: 0, due: todayKey(), last: "", seen: 0, ok: 0 };
       toast("已加入生词本");
     } else {
       state.notebook.splice(i, 1);
@@ -1142,7 +1242,9 @@
 
   function filteredWords() {
     let list = ALL_WORDS;
-    if (ui.vocabTag === "生词本") {
+    if (ui.vocabTag === "待复习") {
+      list = dueWords();
+    } else if (ui.vocabTag === "生词本") {
       list = list.filter(function (w) { return state.notebook.indexOf(w.w) !== -1; });
     } else if (ui.vocabTag === "精讲") {
       list = list.filter(function (w) { return hasDetail(w); });
@@ -1166,6 +1268,7 @@
     cardIndex: 0,
     cardFlipped: false,
     cardSession: { known: 0, fuzzy: 0, unknown: 0, graded: 0 },
+    reviewDeck: null,
     spell: null,
     listen: null,
     dictation: null,
@@ -1299,6 +1402,7 @@
   function pageHome() {
     const d = Math.max(0, daysUntil(state.examDate));
     const day = ensureDay(todayKey());
+    const due = dueCount();
     const done = day.tasks.filter(Boolean).length;
     const phase = phaseInfo();
     const quote = (window.SENTENCES && SENTENCES.length) ? SENTENCES[(Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000)) % SENTENCES.length] : null;
@@ -1309,7 +1413,9 @@
     const taskRows = TASKS.map(function (t, i) {
       const isDone = !!day.tasks[i];
       const label = t.key === "vocab" ? "词汇 " + state.dailyWords + " 个" : t.t;
-      const sub = t.key === "vocab" ? "先过一遍词表，再逐张标记" : t.s;
+      const sub = t.key === "vocab"
+        ? (due ? due + " 词到期，先复习再背新词" : "先过一遍词表，再逐张标记")
+        : t.s;
       return `
         <li class="task ${isDone ? "done" : ""}">
           <button class="check" data-action="toggle-task" data-i="${i}" aria-pressed="${isDone}" aria-label="标记任务：${esc(label)}">
@@ -1366,7 +1472,7 @@
               <a class="quick-item" href="#/reading"><span>阅读一篇</span><span>18 分钟 →</span></a>
               <a class="quick-item" href="#/reading/traps"><span>练干扰项归因</span><span>${(window.TRAP_DRILLS || []).length} 道 →</span></a>
               <a class="quick-item" href="#/sentences"><span>拆两句长难句</span><span>30 句 →</span></a>
-              <a class="quick-item" href="#/me/notebook"><span>过一遍生词</span><span>${state.notebook.length} 词 →</span></a>
+              <a class="quick-item" href="#/vocab"><span>复习到期词</span><span>${due ? due + " 词 →" : "已清空 →"}</span></a>
               <a class="quick-item" href="#/writing"><span>背三句功能句</span><span>写作 →</span></a>
               <a class="quick-item" href="#/plan"><span>看真题规划</span><span>备考 →</span></a>
             </div>
@@ -1415,6 +1521,7 @@
     return TAG_OPTIONS.map(function (t) {
       let count = "";
       if (t.v === "全部") count = ALL_WORDS.length;
+      else if (t.v === "待复习") count = dueCount();
       else if (t.v === "生词本") count = state.notebook.length;
       else if (t.v === "精讲") count = ALL_WORDS.filter(function (w) { return hasDetail(w); }).length;
       else count = ALL_WORDS.filter(function (w) { return w.tag === t.v; }).length;
@@ -1439,6 +1546,7 @@
   function pageVocab() {
     const day = ensureDay(todayKey());
     const list = filteredWords();
+    const due = dueCount();
     const detailed = ALL_WORDS.filter(function (w) { return hasDetail(w); }).length;
     const detailReady = !!window.VOCAB_DETAIL;
     return `
@@ -1447,8 +1555,18 @@
       <div class="stat-strip">
         <div class="stat"><p class="k">词库</p><p class="v">${ALL_WORDS.length}<small>词</small></p><p class="s">${!detailReady ? "词条详解加载中" : (detailed === ALL_WORDS.length ? "全部带用法卡" : detailed + " 精讲 · " + (ALL_WORDS.length - detailed) + " 待补")}</p></div>
         <div class="stat"><p class="k">已掌握</p><p class="v">${knownCount()}<small>词</small></p><p class="s">标记为“认识”</p></div>
-        <div class="stat"><p class="k">生词本</p><p class="v">${state.notebook.length}<small>词</small></p><p class="s">待复习</p></div>
+        <div class="stat"><p class="k">生词本</p><p class="v">${state.notebook.length}<small>词</small></p><p class="s">${due ? due + " 词今日到期" : "今天没有到期词"}</p></div>
         <div class="stat"><p class="k">今日已过</p><p class="v">${day.words}<small>/ ${state.dailyWords}</small></p><p class="s">目标 ${state.dailyWords} 词</p></div>
+      </div>
+
+      <div class="review-banner ${due ? "" : "quiet"}">
+        <div class="review-copy">
+          <p class="label">间隔复习</p>
+          <p>${due
+            ? `<b>${due} 词</b>今天到期。按 1 / 2 / 4 / 7 / 15 / 30 天递进：认识就往后推，模糊明天再来，不认识留在今天。`
+            : "今天到期的词已经清空。按节奏复习，比一次背很多更有用。"}</p>
+        </div>
+        ${due ? `<button class="btn btn-solid" data-action="start-review">开始复习</button>` : ""}
       </div>
 
       <p class="vocab-note">每个词条按“用法—搭配—例句—辨析”整理。点开任意单词即可看完整卡片；卡片背面也会带一句用法和例句，不再只给中文释义。</p>
@@ -1474,8 +1592,16 @@
       <div id="vocabBody">${vocabBody(list)}</div>`;
   }
 
+  // 复习模式用一份固定牌堆：给词打分后到期时间会变，如果每次都重新过滤，
+  // 刚评完的词会从列表里消失，下一张就会被跳过。每轮最多 30 词，做完可再来一轮。
+  function cardList() {
+    if (ui.vocabTag !== "待复习") return filteredWords();
+    if (!ui.reviewDeck) ui.reviewDeck = dueWords().slice(0, 30);
+    return ui.reviewDeck;
+  }
+
   function vocabBody(list) {
-    if (ui.vocabMode === "card") return cardBody(list || filteredWords());
+    if (ui.vocabMode === "card") return cardBody(cardList());
     if (ui.vocabMode === "spell") return spellBody();
     if (ui.vocabMode === "listen") return listenBody();
     if (ui.vocabMode === "dictation") return dictateBody();
@@ -1496,12 +1622,17 @@
     }
     if (ui.cardIndex >= list.length) {
       const s = ui.cardSession;
+      const isReview = ui.vocabTag === "待复习";
+      const remain = dueCount();
       return `<div class="study-wrap">
         <div class="summary">
           <p class="eyebrow" style="justify-content:center">本轮完成</p>
           <p class="big">${s.graded}</p>
-          <h2>这一轮过完了</h2>
+          <h2>${isReview ? "这组复习完成" : "这一轮过完了"}</h2>
           <p>认识 ${s.known} · 模糊 ${s.fuzzy} · 不认识 ${s.unknown}</p>
+          <p>${isReview
+            ? (remain ? `今天还有 ${remain} 词到期，可以再来一组。` : "今天到期的词已经全部过完。")
+            : "卡片分组会按 1 / 2 / 4 / 7 / 15 / 30 天的节奏安排下次复习。"}</p>
           <div class="actions">
             <button class="btn btn-solid" data-action="restart-cards">再来一轮</button>
             <button class="btn btn-quiet" data-action="set-mode" data-mode="list">回到词表</button>
@@ -1548,7 +1679,7 @@
              <button class="btn btn-solid" data-action="grade-card" data-grade="known">认识</button>`
           : `<button class="btn btn-solid" data-action="flip-card">显示释义</button>`}
       </div>
-      <p class="flash-tips">${st.label ? "当前标记：" + st.label + " · " : ""}键盘：空格翻面，1 / 2 / 3 选择</p>
+      <p class="flash-tips">${st.label ? "当前标记：" + st.label + " · " : ""}${srsNextText(w.w) ? "下次复习：" + srsNextText(w.w) + " · " : ""}键盘：空格翻面，1 / 2 / 3 选择</p>
     </div>`;
   }
 
@@ -1825,6 +1956,7 @@
         ${deep ? `<div class="drawer-block drawer-deep"><p class="block-k">辨析</p><p class="block-text">${esc(deep)}</p></div>` : ""}
         <dl class="drawer-facts">
           <div class="row"><dt>状态</dt><dd>${st.label || "尚未标记"}${inBook ? " · 已在生词本" : ""}</dd></div>
+          ${srsNextText(w.w) ? `<div class="row"><dt>下次复习</dt><dd>${srsNextText(w.w)}</dd></div>` : ""}
         </dl>
         <button class="btn btn-sm ${inBook ? "btn-quiet" : "btn-accent"}" data-action="word-toggle-notebook" data-w="${esc(w.w)}" style="margin-top:18px">${inBook ? "移出生词本" : "加入生词本"}</button>
         <p class="drawer-status">${inBook ? "生词本会自动收录“不认识”和“模糊”的词。" : ""}</p>
@@ -3683,7 +3815,7 @@
   }
 
   function gradeCard(grade) {
-    const list = filteredWords();
+    const list = cardList();
     const w = list[ui.cardIndex];
     if (!w) return;
     if (grade === "known") setWordStatus(w.w, "known");
@@ -3804,6 +3936,22 @@
         ui.cardIndex = 0;
         ui.cardFlipped = false;
         ui.cardSession = { known: 0, fuzzy: 0, unknown: 0, graded: 0 };
+        ui.reviewDeck = null;
+        ui.spell = null;
+        ui.listen = null;
+        ui.dictation = null;
+        rerender();
+        break;
+      }
+      case "start-review": {
+        const deck = dueWords().slice(0, 30);
+        if (!deck.length) { toast("今天没有到期词"); break; }
+        ui.vocabTag = "待复习";
+        ui.vocabMode = "card";
+        ui.reviewDeck = deck;
+        ui.cardIndex = 0;
+        ui.cardFlipped = false;
+        ui.cardSession = { known: 0, fuzzy: 0, unknown: 0, graded: 0 };
         ui.spell = null;
         ui.listen = null;
         ui.dictation = null;
@@ -3816,6 +3964,7 @@
         ui.cardIndex = 0;
         ui.cardFlipped = false;
         ui.cardSession = { known: 0, fuzzy: 0, unknown: 0, graded: 0 };
+        ui.reviewDeck = null;
         ui.spell = null;
         ui.listen = null;
         ui.dictation = null;
@@ -3910,6 +4059,11 @@
         gradeCard(data.grade);
         break;
       case "restart-cards":
+        if (ui.vocabTag === "待复习") {
+          const nextDeck = dueWords().slice(0, 30);
+          if (!nextDeck.length) { toast("今天到期的词已经全部过完"); break; }
+          ui.reviewDeck = nextDeck;
+        }
         ui.cardIndex = 0;
         ui.cardFlipped = false;
         ui.cardSession = { known: 0, fuzzy: 0, unknown: 0, graded: 0 };
@@ -4528,6 +4682,7 @@
         ui.cardIndex = 0;
         ui.cardFlipped = false;
         ui.cardSession = { known: 0, fuzzy: 0, unknown: 0, graded: 0 };
+        ui.reviewDeck = null;
         ui.spell = null;
         ui.redo = {};
         ui.reviewed = {};
@@ -4698,6 +4853,7 @@
             ui.cardIndex = 0;
             ui.cardFlipped = false;
             ui.cardSession = { known: 0, fuzzy: 0, unknown: 0, graded: 0 };
+            ui.reviewDeck = null;
             ui.spell = null;
             ui.redo = {};
             ui.reviewed = {};
@@ -4804,7 +4960,21 @@
      boot
   ------------------------------------------------------------------ */
 
+  // 在线版首次打开后把核心文件放进 Cache Storage，断网也能重新打开。
+  // file:// 打开单文件版时不注册（浏览器不允许），不影响本地使用。
+  function registerOfflineCache() {
+    if (!("serviceWorker" in navigator)) return;
+    const secure = location.protocol === "https:"
+      || location.hostname === "localhost"
+      || location.hostname === "127.0.0.1";
+    if (!secure) return;
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("sw.js").catch(function () { /* 离线增强失败不影响主功能 */ });
+    });
+  }
+
   bindEvents();
+  registerOfflineCache();
   setInterval(timerTick, 250);
   setInterval(readingTick, 1000);
   render();
