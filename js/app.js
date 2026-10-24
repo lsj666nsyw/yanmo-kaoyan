@@ -3628,8 +3628,12 @@
     const paper = mockPaper(raw.paperId);
     if (!paper) return null;
     const startedAt = Number(raw.startedAt);
-    const endAt = Number(raw.endAt);
+    let endAt = Number(raw.endAt);
     if (!Number.isFinite(startedAt) || !Number.isFinite(endAt)) return null;
+    // 设备时钟向前跳变时把结束时间钳制到合法上限；endAt 早于开始或已过期的情况
+    // 保持原值，让“剩余 ≤ 0 → 自动交卷”走正常回收路径，避免把已超时的场次“复活”。
+    const maxEnd = startedAt + EXAM_TIME * 1000;
+    if (endAt > maxEnd) endAt = maxEnd;
     const answers = normalizeExamAnswers(raw.answers, paper);
     const flags = (Array.isArray(raw.flags) ? raw.flags : []).map(Number).filter(function (q) {
       return Number.isInteger(q) && q >= 0 && q < EXAM_OBJECTIVE_COUNT;
@@ -3795,6 +3799,27 @@
     const wa = sumDims(WRITING_A_DIMS, self.writingA);
     const wb = sumDims(writingBDims(paper), self.writingB);
     return { translation: trans, writingA: wa, writingB: wb, subjective: trans + wa + wb };
+  }
+
+  // 自评防误判：某个题目实际没写，却给了分 → 列出来提醒再锁定成绩
+  function examSelfIssues(rec, paper) {
+    const issues = [];
+    const ta = rec.answers, sf = rec.self || {};
+    const sumDims = function (dims, src) {
+      return dims.reduce(function (s, d) {
+        return s + Math.max(0, Math.min(d.max, Number((src || {})[d.key]) || 0));
+      }, 0);
+    };
+    if (paper.translation.kind === "sentences") {
+      (sf.translationSentences || []).forEach(function (s, i) {
+        if ((Number(s) || 0) > 0 && !String(ta.translationS[i] || "").trim()) issues.push("第 " + (i + 1) + " 句翻译没写却给了分");
+      });
+    } else if ((sf.translationPoints || []).filter(Boolean).length > 0 && !String(ta.translation || "").trim()) {
+      issues.push("整段翻译没写却勾选了采分点");
+    }
+    if (sumDims(WRITING_A_DIMS, sf.writingA) > 0 && !String(ta.writingA || "").trim()) issues.push("小作文没写却给小作文打了分");
+    if (sumDims(writingBDims(paper), sf.writingB) > 0 && !String(ta.writingB || "").trim()) issues.push("大作文没写却给大作文打了分");
+    return issues;
   }
 
   function paperKeyTranslation(paper) {
@@ -4597,6 +4622,7 @@
   function examSelfPanel(rec, paper) {
     const selfScore = examSelfScore(rec, paper);
     const type = mockType(paper.type);
+    const issues = examSelfIssues(rec, paper);
     return `
       <section class="section exam-self-section" id="examSelf">
         <div class="section-head">
@@ -4607,6 +4633,7 @@
         ${examSelfTranslation(rec, paper)}
         ${examSelfWritingBlock(rec, paper, "wa")}
         ${examSelfWritingBlock(rec, paper, "wb")}
+        ${issues.length ? `<p class="self-warn-note">评分与作答不一致，交卷时会再确认：${esc(issues.slice(0, 4).join("；"))}${issues.length > 4 ? " 等" : ""}</p>` : ""}
         <div class="exam-self-finish">
           <div><b>主观题合计 ${selfScore.subjective} / 40</b><span>翻译 ${examScoreText(selfScore.translation)} / ${type.translation} · 小作文 ${selfScore.writingA} / ${type.writingA} · 大作文 ${selfScore.writingB} / ${type.writingB}</span></div>
           ${rec.self.done ? `<span class="tag green">已完成自评</span>` : `<button class="btn btn-solid" data-action="exam-self-done" data-id="${esc(rec.id)}">完成自评并记入成绩</button>`}
@@ -5520,6 +5547,13 @@
       case "exam-self-done": {
         const rec = state.exams.find(function (r) { return String(r.id) === String(data.id); });
         if (!rec) break;
+        const paper = mockPaper(rec.paperId);
+        const issues = paper ? examSelfIssues(rec, paper) : [];
+        if (issues.length) {
+          const head = "有几处评分与作答不一致，确定照此记入成绩？";
+          const body = issues.slice(0, 4).join("；") + (issues.length > 4 ? " 等" : "") + "。";
+          if (!window.confirm(head + "\n" + body)) break;
+        }
         rec.self.done = true;
         examRecalc(rec);
         save();

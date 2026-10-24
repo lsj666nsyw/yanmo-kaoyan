@@ -2096,6 +2096,7 @@ mark { background: #eee0d3; color: inherit; padding: 0 2px; }
 .exam-self-trans-sentence { padding: 18px 0; border-bottom: 1px solid var(--line-2); }
 .exam-self-trans-sentence:first-of-type { margin-top: 14px; border-top: 1px solid var(--line-2); }
 .exam-self-trans-sentence .trans-en { margin-top: 8px; }
+.self-warn-note { margin: 0 0 8px; padding: 9px 12px; background: var(--accent-soft); border-left: 2px solid var(--accent); font-size: 11px; line-height: 1.6; color: var(--accent); }
 .exam-self-finish {
   display: flex; align-items: center; justify-content: space-between; gap: 20px;
   margin-top: 24px; padding: 18px 20px; border: 1px solid var(--ink); background: var(--paper-2);
