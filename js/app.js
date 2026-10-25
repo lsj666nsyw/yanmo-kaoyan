@@ -2,7 +2,7 @@
   "use strict";
 
   // 显示在页脚与语音自检里，方便确认手机上跑的是不是最新版本
-  const APP_BUILD = "2026-10-25.1";
+  const APP_BUILD = "2026-10-25.2";
 
   /* ------------------------------------------------------------------
      data
@@ -3427,6 +3427,17 @@
     return String(text || "").replace(/\s/g, "").length;
   }
 
+  function transCheckBox(key) {
+    return `<div class="check-box trans-check">
+      <div class="check-bar">
+        <span class="label">自动检查</span>
+        <span class="check-hint">术语与完整度初检 · 不替代参考译文</span>
+        <button class="text-link" data-action="check-trans" data-key="${esc(key)}">检查译文</button>
+      </div>
+      <div class="check-result" data-trans-result="${esc(key)}" aria-live="polite"></div>
+    </div>`;
+  }
+
   function pageTranslation() {
     const isSentence = ui.transTab === "sentence";
     const methods = window.TRANSLATIONS.methods.map(function (m) {
@@ -3474,6 +3485,7 @@
           </div>
           <textarea class="trans-input" data-trans-input="${key}" placeholder="先自己译一遍，再对照参考。">${esc(value)}</textarea>
           <div class="trans-count"><span data-trans-count="${key}">已写 ${countChars(value)} 字</span><span>参考译文约 ${countChars(entry ? entry.ref : "")} 字</span></div>
+          ${transCheckBox(key)}
           ${open ? transRefPanel(entry, key) : ""}
         </article>`;
     }).join("")}</div>`;
@@ -3506,6 +3518,7 @@
           </div>
           <textarea class="trans-input trans-input-lg" data-trans-input="${key}" placeholder="按英语二段落翻译的要求，译成连贯的中文。">${esc(value)}</textarea>
           <div class="trans-count"><span data-trans-count="${key}">已写 ${countChars(value)} 字</span><span>参考译文约 ${countChars(entry.ref)} 字</span></div>
+          ${transCheckBox(key)}
           ${open ? transRefPanel(entry, key) : ""}
         </article>
       </div>`;
@@ -3707,6 +3720,14 @@
         <div class="draft-head"><span class="label">写作练习</span><span class="score-note">目标 ${target} 词左右</span></div>
         <textarea data-draft="${key}" placeholder="先列提纲，再写。写完对照范文，只改三处：结构、语法、重复用词。">${esc(value)}</textarea>
         <div class="draft-foot"><span data-draft-count="${key}">${wordCount(value)} 词</span><span>内容仅保存在本机</span></div>
+        <div class="check-box draft-check">
+          <div class="check-bar">
+            <span class="label">自动检查</span>
+            <span class="check-hint">离线初检 · 不替代老师</span>
+            <button class="text-link" data-action="check-draft" data-key="${key}" data-kind="${kind}" data-i="${i}">检查这篇</button>
+          </div>
+          <div class="check-result" data-draft-result="${key}" aria-live="polite"></div>
+        </div>
         <details class="draft-self-box" data-draft-self="${key}">
           <summary><span>写完后自评</span><b data-draft-self-score="${key}">${got} / ${max}</b></summary>
           <div class="draft-self-body">
@@ -3762,6 +3783,858 @@
         <div class="section-head"><h2>常见失分点</h2><span class="section-note">写完后逐条核对</span></div>
         <ul class="pitfall-list">${pitfalls}</ul>
       </section>`;
+  }
+
+  /* ------------------------------------------------------------------
+     offline subjective feedback
+     写作 / 翻译的离线初检：只判断可计算、可解释的表面特征，
+     内容深度与逻辑仍以对照范文、参考译文和自评为准。
+  ------------------------------------------------------------------ */
+
+  const FB_STOP = new Set(("a an the and or but if while because as of to in on at for from with without by about into over under between among through during before after above below up down out off again further then once here there when where why how all any both each few more most other some such no nor not only own same so than too very can could may might must shall should will would do does did have has had be is are was were being been i me my we our you your he him his she her it its they them their this that these those what which who whom whose".split(" ")));
+  const FB_CONNECTIVES = ["however", "therefore", "moreover", "furthermore", "in addition", "for example", "for instance", "as a result", "on the other hand", "while", "although", "because", "since", "thus", "consequently", "nevertheless", "in conclusion", "to begin with", "first", "second", "finally", "by contrast", "meanwhile", "if", "when", "whenever", "after", "before", "so that", "in order to", "instead", "besides", "at present", "in this way", "for this reason", "but", "yet", "also", "rather than"];
+  const FB_COMPLEX = ["because", "although", "while", "which", "that", "who", "whom", "whose", "if", "unless", "when", "whether", "since", "as", "despite", "whereas", "not only", "rather than", "even though"];
+  const FB_ANALYSIS = ["because", "therefore", "as a result", "lead to", "leads to", "result in", "results in", "cause", "causes", "reason", "due to", "by contrast", "however", "while", "the problem", "the result"];
+  const FB_SUGGESTION = ["should", "can", "could", "need to", "recommend", "suggest", "it is advisable", "would be", "might"];
+  const FB_DESCRIPTION = ["shows", "show", "depicts", "illustrates", "figure", "chart", "graph", "caption", "in the picture", "in the drawing", "the drawing", "the photo"];
+  const FB_CLICHES = ["with the development of society", "with the development of the economy", "every coin has two sides", "more and more", "a lot of", "lots of", "last but not least", "as we all know", "it is well known that", "in modern society", "play an important role"];
+  const FB_CONTRACTIONS = ["don't", "doesn't", "didn't", "can't", "couldn't", "won't", "wouldn't", "shouldn't", "isn't", "aren't", "wasn't", "weren't", "it's", "i'm", "i've", "i'd", "i'll", "they're", "we're", "you're", "that's", "there's"];
+  const FB_MISSPELL = {
+    recieve: "receive", seperate: "separate", definately: "definitely", enviroment: "environment",
+    goverment: "government", developement: "development", benifit: "benefit", neccessary: "necessary",
+    accomodate: "accommodate", arguement: "argument", calender: "calendar", comming: "coming",
+    concious: "conscious", embarass: "embarrass", existance: "existence", foriegn: "foreign",
+    freind: "friend", happend: "happened", immediatly: "immediately", knowlege: "knowledge",
+    occured: "occurred", oppurtunity: "opportunity", prefered: "preferred", priviledge: "privilege",
+    publically: "publicly", recomend: "recommend", refered: "referred", responsability: "responsibility",
+    succesful: "successful", suprise: "surprise", thier: "their", tommorow: "tomorrow",
+    untill: "until", wich: "which", wierd: "weird"
+  };
+  const SMALL_TYPE_CUES = {
+    "建议信": ["suggest", "recommend", "propose", "advice", "would be grateful", "consider", "at present"],
+    "感谢信": ["thank", "grateful", "appreciate", "help", "return", "comments", "patience", "generosity"],
+    "投诉信": ["complain", "complaint", "problem", "dissatisfied", "expect", "solve", "refund", "ordered", "delivery", "reply"],
+    "通知": ["notice", "conference", "volunteers", "training", "certificate", "available", "organizing committee", "by"],
+    "邀请信": ["invite", "invitation", "forum", "speak", "convenient", "travel", "annual"],
+    "道歉信": ["apologize", "apologise", "apology", "sorry", "inconvenience", "replacement", "make up", "appointment", "outline"],
+    "申请信": ["apply", "application", "position", "program", "programme", "qualification", "interview", "tutoring", "references"],
+    "咨询信": ["inquire", "enquire", "information", "details", "question", "reply", "further", "workshop", "register", "deadline"],
+    "祝贺信": ["congratulate", "congratulations", "achievement", "success", "wish", "admitted", "graduate", "celebrate"],
+    "推荐信": ["recommend", "candidate", "strength", "qualified", "support", "supervisor", "persistence", "exchange"],
+    "倡议信": ["propose", "phone-free", "trial", "signs", "support", "students' union"],
+    "回复信": ["invitation", "accept", "seminar", "materials", "arrange", "grateful"]
+  };
+  const SMALL_TYPE_HINTS = {
+    "建议信": "说明现状与理由，提出具体建议，再请求考虑",
+    "感谢信": "感谢具体帮助，说明它带来的影响，再表达回报意愿",
+    "投诉信": "说明问题与影响，提出合理诉求，语气克制",
+    "通知": "写清事由、时间、地点、参与对象和截止时间",
+    "邀请信": "说明活动、时间、地点、安排，并请对方回复",
+    "道歉信": "说明原因、表达歉意、给出补救办法",
+    "申请信": "说明申请目标、相关经历与能力、请求面试",
+    "咨询信": "说明想了解的信息，问题具体，留下联系方式",
+    "祝贺信": "点明祝贺事由，肯定对方努力，表达祝愿",
+    "推荐信": "说明关系、推荐理由、具体能力与支持态度"
+  };
+
+  const feedbackCache = Object.create(null);
+
+  function fbReEscape(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function fbHas(text, phrase) {
+    const t = String(text || "").toLowerCase();
+    const p = String(phrase || "").toLowerCase();
+    if (!p) return false;
+    if (/^[a-z][a-z'-]*$/.test(p)) {
+      return new RegExp("\\b" + fbReEscape(p) + "\\b", "i").test(t);
+    }
+    return t.indexOf(p) !== -1;
+  }
+
+  function fbWords(text) {
+    return (String(text || "").match(/[A-Za-z][A-Za-z'-]*/g) || []).map(function (w) { return w.toLowerCase(); });
+  }
+
+  function fbSentences(text) {
+    const protectedText = String(text || "")
+      .replace(/\b(?:Mr|Mrs|Ms|Dr|Prof|St|vs|etc|e\.g|i\.e|a\.m|p\.m)\./gi, function (m) { return m.replace(/\./g, "\u0001"); })
+      .replace(/\s+/g, " ");
+    return protectedText.split(/[.!?]+(?:\s+|$)/).map(function (s) { return s.replace(/\u0001/g, ".").trim(); }).filter(Boolean);
+  }
+
+  function fbParagraphs(text) {
+    let parts = String(text || "").split(/\n{2,}/).map(function (s) { return s.trim(); }).filter(Boolean);
+    if (parts.length <= 1) {
+      const lines = String(text || "").split(/\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+      if (lines.length > 1) parts = lines;
+    }
+    return parts;
+  }
+
+  function fbWordSet(text) {
+    const set = new Set();
+    fbWords(text).forEach(function (w) {
+      set.add(w);
+      if (w.length > 3 && /s$/.test(w)) set.add(w.slice(0, -1));
+      else set.add(w + "s");
+    });
+    return set;
+  }
+
+  function fbTopContent(text, limit) {
+    const counts = Object.create(null);
+    fbWords(text).forEach(function (w) {
+      if (w.length < 4 || FB_STOP.has(w)) return;
+      counts[w] = (counts[w] || 0) + 1;
+    });
+    return Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a] || a.localeCompare(b); }).slice(0, limit || 40);
+  }
+
+  function fbCoverage(text, sample) {
+    const base = fbTopContent(sample, 40);
+    if (!base.length) return 0;
+    const set = fbWordSet(text);
+    let hit = 0;
+    base.forEach(function (w) { if (set.has(w)) hit++; });
+    return hit / base.length;
+  }
+
+  function fbRepeats(words) {
+    const counts = Object.create(null);
+    words.forEach(function (w) {
+      if (w.length < 4 || FB_STOP.has(w)) return;
+      counts[w] = (counts[w] || 0) + 1;
+    });
+    return Object.keys(counts).filter(function (w) {
+      return counts[w] >= 5 && counts[w] / Math.max(1, words.length) >= 0.035;
+    }).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 4).map(function (w) {
+      return { word: w, count: counts[w] };
+    });
+  }
+
+  function fbStats(text) {
+    const words = fbWords(text);
+    const sents = fbSentences(text);
+    const lens = sents.map(function (s) { return fbWords(s).length; }).filter(function (n) { return n > 0; });
+    const totalLen = lens.reduce(function (a, b) { return a + b; }, 0);
+    const avgSent = lens.length ? totalLen / lens.length : 0;
+    const longRatio = lens.length ? lens.filter(function (n) { return n >= 28; }).length / lens.length : 0;
+    const shortRatio = lens.length ? lens.filter(function (n) { return n <= 7; }).length / lens.length : 0;
+    const uniqueRatio = words.length ? new Set(words).size / words.length : 0;
+    return {
+      wc: wordCount(text),
+      paras: fbParagraphs(text),
+      sents: sents,
+      words: words,
+      avgSent: avgSent,
+      longRatio: longRatio,
+      shortRatio: shortRatio,
+      uniqueRatio: uniqueRatio,
+      connectives: FB_CONNECTIVES.filter(function (c) { return fbHas(text, c); }),
+      complexCount: sents.filter(function (s) {
+        return FB_COMPLEX.some(function (c) { return fbHas(s, c); });
+      }).length,
+      repeats: fbRepeats(words),
+      cliches: FB_CLICHES.filter(function (c) { return fbHas(text, c); }),
+      contractions: FB_CONTRACTIONS.filter(function (c) { return fbHas(text, c); }),
+      chinese: (String(text || "").match(/[\u4e00-\u9fa5]/g) || []).length
+    };
+  }
+
+  function fbParagraphBalance(text) {
+    const paras = fbParagraphs(text);
+    const counts = paras.map(function (p) { return wordCount(p); });
+    const total = counts.reduce(function (a, b) { return a + b; }, 0);
+    return total ? Math.max.apply(null, counts) / total : 1;
+  }
+
+  function fbFormatChecks(text, item, kind) {
+    const lines = String(text || "").split(/\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+    const first = lines[0] || "";
+    const last = lines[lines.length - 1] || "";
+    const type = String((item && item.type) || "");
+    const isNotice = /通知/.test(type);
+    const orgSignature = /^(?:the\s+)?(?:students?'?|student)\s+union$|^(?:the\s+)?organizing committee$/i.test(last);
+    const purposeByType = {
+      "建议信": /\b(suggest|recommend|propose)\b/i,
+      "感谢信": /\b(thank|grateful|appreciate)\b/i,
+      "投诉信": /\b(ordered|complaint|concern|refund|delivery|not arrived)\b/i,
+      "通知": /\b(will host|is scheduled|will be held|we are looking for|notice)\b/i,
+      "邀请信": /\b(invite|invitation)\b/i,
+      "道歉信": /\b(apolog|sorry|regret)\b/i,
+      "申请信": /\b(apply|application)\b/i,
+      "咨询信": /\b(enquire|inquire|question|clarify)\b/i,
+      "祝贺信": /\b(congratulat|delighted to hear|admitted)\b/i,
+      "推荐信": /\b(recommend)\b/i,
+      "倡议信": /\b(propose|call on|we are writing)\b/i,
+      "回复信": /\b(thank you for your invitation|glad to accept|accept)\b/i
+    };
+    const typePurpose = purposeByType[type] ? purposeByType[type].test(text) : false;
+    return {
+      isNotice: isNotice,
+      orgSignature: orgSignature,
+      hasDear: /^(dear\b|to whom it may concern)/i.test(first),
+      hasClosing: /\b(yours sincerely|yours faithfully|sincerely|best regards|warm regards|warmest regards|best wishes|all the best|regards)\b/i.test(text),
+      hasSignature: !!last && (orgSignature || /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}$/.test(last) || /\b(li ming|student union|students' union|committee)\b/i.test(last)),
+      hasPolite: /\b(please|grateful|thank|appreciate|sorry|regret|kindly|could you|would you|would be glad|would appreciate|look forward)\b/i.test(text),
+      hasPurpose: typePurpose || /\b(i am writing|we are writing|i write|i would like to|this is to|we are pleased|is scheduled|i am applying)\b/i.test(text),
+      hasNoticeHeading: /^\s*(notice|notification)\b/i.test(first) || /\bnotice\b/i.test(first),
+      hasDate: /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*/i.test(text),
+      hasDetails: /\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\b|\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|week|month|room|floor|library|campus|online)\b/i.test(text),
+      first: first,
+      last: last,
+      kind: kind
+    };
+  }
+
+  function fbIssue(level, tag, title, detail, excerpt) {
+    return { level: level, tag: tag, title: title, detail: detail, excerpt: excerpt || "" };
+  }
+
+  function fbExcerpt(text, match, len) {
+    if (!match) return "";
+    const s = String(text || "");
+    const i = s.indexOf(match);
+    if (i < 0) return String(match).slice(0, len || 72);
+    const start = Math.max(0, i - 18);
+    const end = Math.min(s.length, i + String(match).length + 24);
+    const body = s.slice(start, end).replace(/\s+/g, " ").trim();
+    return (start > 0 ? "…" : "") + body.slice(0, len || 72) + (end < s.length ? "…" : "");
+  }
+
+  function fbTail(text, len) {
+    const s = String(text || "").replace(/\s+/g, " ").trim();
+    const n = len || 56;
+    return (s.length > n ? "…" : "") + s.slice(Math.max(0, s.length - n));
+  }
+
+  function fbSpellingIssues(text) {
+    const out = [];
+    Object.keys(FB_MISSPELL).forEach(function (wrong) {
+      if (!fbHas(text, wrong)) return;
+      out.push(fbIssue("mid", "规范", "拼写错误", wrong + " → " + FB_MISSPELL[wrong], fbExcerpt(text, wrong, 56)));
+    });
+    return out;
+  }
+
+  function fbGrammarIssues(text) {
+    const rules = [
+      { re: /\b(?:i am|i'm) agree\b/i, title: "I agree 前不用 am", detail: "改为 I agree，而不是 I am agree。" },
+      { re: /\bdiscuss about\b/i, title: "discuss 后不加 about", detail: "discuss the issue，不说 discuss about the issue。" },
+      { re: /\bemphasi[sz]e on\b/i, title: "emphasize 后不加 on", detail: "emphasize the importance，不说 emphasize on。" },
+      { re: /\baccording to my opinion\b/i, title: "according to 后接来源", detail: "改为 in my opinion 或 according to the survey。" },
+      { re: /\bin the other hand\b/i, title: "固定搭配", detail: "改为 on the other hand。" },
+      { re: /\bon one hand\b/i, title: "固定搭配", detail: "改为 on the one hand。" },
+      { re: /\bmore better\b/i, title: "比较级重复", detail: "改为 better。" },
+      { re: /\bmost easiest\b/i, title: "最高级重复", detail: "改为 easiest。" },
+      { re: /\bcan be able to\b/i, title: "情态动词重复", detail: "改为 can 或 be able to。" },
+      { re: /\bthere have\b/i, title: "there be 句型", detail: "改为 there are / there is，不用 there have。" },
+      { re: /\bpeople (?:is|was|has)\b/i, title: "主谓一致", detail: "people 作复数，用 people are / were / have。" },
+      { re: /\b(?:students|they) has\b/i, title: "主谓一致", detail: "复数主语用 have。" },
+      { re: /\b(?:he|she|it) (?:go|have|do|make|take|need|want)\b/i, title: "主谓一致", detail: "第三人称单数动词要加 -s。" },
+      { re: /\balthough\b[^.!?]{0,160}\bbut\b/i, title: "although 与 but 不连用", detail: "保留 although 或 but 其中一个。" },
+      { re: /\bbecause\b[^.!?]{0,160}\bso\b/i, title: "because 与 so 不连用", detail: "保留 because 或 so 其中一个。" },
+      { re: /\bthe reason is because\b/i, title: "reason 后接 that", detail: "改为 the reason is that。" },
+      { re: /\bin nowadays\b/i, title: "nowadays 前不加 in", detail: "直接用 nowadays。" },
+      { re: /\ba (?:apple|orange|egg|idea|issue|answer|example|effect|advantage|opportunity|important|interesting|easy|old|hour|honest)\b/i, title: "冠词", detail: "元音音素前用 an。" },
+      { re: /\ban (?:book|car|student|person|problem|reason|way|good|bad|large|small)\b/i, title: "冠词", detail: "辅音音素前用 a。" }
+    ];
+    const out = [];
+    rules.forEach(function (r) {
+      const m = String(text || "").match(r.re);
+      if (!m) return;
+      out.push(fbIssue("mid", "语言", r.title, r.detail, fbExcerpt(text, m[0], 64)));
+    });
+    // 句子开头小写：只报一次，避免每句都刷屏
+    const lower = fbSentences(text).find(function (s) {
+      const m = s.match(/^[^A-Za-z]*([a-z])/);
+      return !!m;
+    });
+    if (lower) out.push(fbIssue("mid", "规范", "句首字母小写", "每句第一个单词首字母大写。", fbExcerpt(text, lower, 60)));
+    return out;
+  }
+
+  function fbMechanicsIssues(text, opts) {
+    const out = [];
+    const t = String(text || "");
+    if (/[\u4e00-\u9fa5]/.test(t)) {
+      out.push(fbIssue("high", "规范", "混入中文", "英文写作中不要出现中文；专有名词除外。", fbExcerpt(t, (t.match(/[\u4e00-\u9fa5]+/) || [""])[0], 48)));
+    }
+    if (/\S {2,}\S/.test(t)) out.push(fbIssue("low", "规范", "多余空格", "单词之间保留一个空格即可。", ""));
+    if (/[A-Za-z]\s+[,.;:!?]/.test(t)) out.push(fbIssue("low", "规范", "标点前多空格", "逗号、句号前不要留空格。", ""));
+    const missingSpace = (t.match(/[a-z][,.;:!?][A-Za-z]/g) || []).filter(function (m) {
+      return !/^(?:p|a)\.m$|^(?:e\.g|i\.e|u\.s|u\.k)$/i.test(m);
+    });
+    if (missingSpace.length && !/https?:\/\/|[\w.+-]+@[\w.-]+\.\w+/i.test(t)) {
+      out.push(fbIssue("low", "规范", "标点后缺空格", "逗号、句号后接下一句时加一个空格。", ""));
+    }
+    if (/\([^)]*$/.test(t) || /^[^(]*\)/.test(t)) out.push(fbIssue("low", "规范", "括号不配对", "检查左右括号是否成对。", ""));
+    const lines = t.split(/\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+    const last = lines[lines.length - 1] || "";
+    const skipFinal = !!(opts && opts.skipFinal);
+    if (!skipFinal && last && !/[.!?…:;"'”’)]$/.test(last) && !/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}$/.test(last)) {
+      out.push(fbIssue("low", "规范", "结尾缺标点", "最后一句补上句号。", fbExcerpt(t, last, 48)));
+    }
+    return out;
+  }
+
+  function fbSortIssues(issues) {
+    const rank = { high: 0, mid: 1, low: 2, good: 3 };
+    return issues.slice().sort(function (a, b) { return (rank[a.level] || 0) - (rank[b.level] || 0); });
+  }
+
+  function fbPct(n) {
+    return Math.round(Math.max(0, Math.min(1, n)) * 100) + "%";
+  }
+
+  function fbDimReason(key, stats, coverage, cues, cueHits, spelling, grammar, mechanics) {
+    if (key === "content") {
+      return "词数 " + stats.wc + "；段落 " + stats.paras.length + "；主题词覆盖 " + fbPct(coverage) +
+        (cues.length ? "；信息点命中 " + cueHits.length + " / " + cues.length : "");
+    }
+    if (key === "format") {
+      return "称呼、结尾、署名、语气按项检查";
+    }
+    if (key === "structure") {
+      return "段落 " + stats.paras.length + "；连接词 " + stats.connectives.length + " 类；段长占比 " + fbPct(fbParagraphBalance(stats.text || ""));
+    }
+    if (key === "language") {
+      return "平均句长 " + stats.avgSent.toFixed(1) + "；复杂句 " + stats.complexCount + "；词汇多样性 " + fbPct(stats.uniqueRatio);
+    }
+    if (key === "accuracy") {
+      return "拼写/语法/规范问题 " + (spelling.length + grammar.length + mechanics.length) + " 处";
+    }
+    return "";
+  }
+
+  function writingFeedback(text, opts) {
+    const kind = opts.kind || "small";
+    const item = opts.item || {};
+    const dims = opts.dims || [];
+    const max = opts.max || dims.reduce(function (s, d) { return s + d.max; }, 0);
+    const target = opts.target || (kind === "small" ? 100 : 160);
+    const stats = fbStats(text);
+    stats.text = text;
+    const coverage = fbCoverage(text, item.sample || "");
+    const format = fbFormatChecks(text, item, kind);
+    const cues = SMALL_TYPE_CUES[item.type] || [];
+    const cueHits = cues.filter(function (c) { return fbHas(text, c); });
+    const analysisHits = FB_ANALYSIS.filter(function (c) { return fbHas(text, c); }).length;
+    const suggestionHits = FB_SUGGESTION.filter(function (c) { return fbHas(text, c); }).length;
+    const descriptionHits = FB_DESCRIPTION.filter(function (c) { return fbHas(text, c); }).length;
+    const spelling = fbSpellingIssues(text);
+    const grammar = fbGrammarIssues(text);
+    const mechanics = fbMechanicsIssues(text, { skipFinal: kind === "small" && format.hasSignature });
+    const issues = [];
+    const scores = {};
+    const politeRequired = ["建议信", "感谢信", "投诉信", "邀请信", "道歉信", "申请信", "咨询信", "推荐信", "回复信"].indexOf(item.type) !== -1;
+    const dim = function (key) { return dims.find(function (d) { return d.key === key; }) || { max: 0 }; };
+
+    if (!String(text || "").trim()) {
+      dims.forEach(function (d) { scores[d.key] = 0; });
+      issues.push(fbIssue("high", "内容", "还没有写", "先写一版，再让检查器给出结构和语言问题。", ""));
+    } else {
+      // 内容
+      let content = 0;
+      if (stats.wc >= target * 0.8) content += 2;
+      else if (stats.wc >= target * 0.6) content += 1.5;
+      else if (stats.wc >= target * 0.4) content += 1;
+      else content += 0.5;
+      if (kind === "small") {
+        if (cueHits.length >= 3) content += 2;
+        else if (cueHits.length === 2) content += 1.5;
+        else if (cueHits.length === 1) content += 1;
+        if (format.hasDetails) content += 1;
+        if (coverage >= 0.3) content += 1;
+        else if (coverage >= 0.15) content += 0.5;
+      } else {
+        if (stats.paras.length >= 3) content += 1;
+        else if (stats.paras.length === 2) content += 0.5;
+        if (coverage >= 0.4) content += 1.5;
+        else if (coverage >= 0.25) content += 1;
+        else if (coverage >= 0.15) content += 0.5;
+        if (analysisHits >= 3) content += 1;
+        else if (analysisHits >= 1) content += 0.5;
+        if (suggestionHits >= 2) content += 0.5;
+        else if (suggestionHits >= 1) content += 0.25;
+        if (descriptionHits >= 1) content += 0.5;
+      }
+      scores.content = Math.min(dim("content").max, Math.round(content));
+      if (stats.wc < target * 0.4) scores.content = Math.min(scores.content, Math.max(1, Math.round(dim("content").max * 0.4)));
+
+      // 格式（小作文）
+      if (dim("format").max) {
+        let f = 0;
+        if (format.isNotice) {
+          if (format.hasNoticeHeading) f += 0.75;
+          if (format.hasSignature || format.hasDate) f += 0.5;
+          if (format.hasPurpose) f += 0.75;
+        } else {
+          if (format.hasDear) f += 0.5;
+          if (format.hasClosing) f += 0.5;
+          if (format.hasSignature) f += 0.5;
+          if (format.hasPolite) f += 0.5;
+          if (format.orgSignature) f += 0.5;
+        }
+        scores.format = Math.max(0, Math.min(dim("format").max, Math.round(f)));
+      }
+
+      // 结构（大作文）
+      if (dim("structure").max) {
+        let s = 0;
+        if (stats.paras.length >= 3) s += 3;
+        else if (stats.paras.length === 2) s += 2;
+        else s += 1;
+        if (stats.connectives.length >= 5) s += 1.5;
+        else if (stats.connectives.length >= 3) s += 1;
+        else if (stats.connectives.length >= 1) s += 0.5;
+        if (stats.paras.length >= 2 && fbParagraphBalance(text) <= 0.65) s += 0.5;
+        scores.structure = Math.max(0, Math.min(dim("structure").max, Math.round(s)));
+      }
+
+      // 语言
+      let language = 1;
+      if (stats.avgSent >= 10 && stats.avgSent <= 24) language += 0.75;
+      else if (stats.avgSent >= 8 && stats.avgSent <= 30) language += 0.4;
+      if (stats.longRatio >= 0.1 && stats.longRatio <= 0.5) language += 0.5;
+      if (stats.shortRatio >= 0.1 && stats.shortRatio <= 0.6) language += 0.5;
+      if (stats.complexCount >= 3) language += 1;
+      else if (stats.complexCount >= 2) language += 0.75;
+      else if (stats.complexCount >= 1) language += 0.4;
+      if (stats.uniqueRatio >= 0.45) language += 0.5;
+      else if (stats.uniqueRatio >= 0.35) language += 0.25;
+      if (stats.connectives.length >= 3) language += 0.5;
+      else if (stats.connectives.length >= 2) language += 0.25;
+      if (stats.cliches.length) language -= 0.5;
+      if (stats.contractions.length) language -= 0.5;
+      if (stats.repeats.length) language -= 0.25;
+      if (stats.chinese) language -= 0.5;
+      if (stats.wc < target * 0.4) language = Math.min(language, 1);
+      if (stats.avgSent < 8 && stats.complexCount === 0) language = Math.min(language, 1);
+      scores.language = Math.max(0, Math.min(dim("language").max, Math.round(language)));
+
+      // 语法与拼写
+      const high = spelling.length + grammar.filter(function (g) { return g.level === "high"; }).length + mechanics.filter(function (m) { return m.level === "high"; }).length;
+      const mid = grammar.filter(function (g) { return g.level === "mid"; }).length + mechanics.filter(function (m) { return m.level === "mid"; }).length;
+      const low = mechanics.filter(function (m) { return m.level === "low"; }).length;
+      const quality = Math.max(0, 1 - Math.min(1, high * 0.28 + mid * 0.12 + low * 0.05 + (stats.chinese ? 0.5 : 0)));
+      scores.accuracy = Math.max(0, Math.min(dim("accuracy").max, Math.round(dim("accuracy").max * quality)));
+
+      // 问题清单
+      if (stats.wc < target * 0.7) issues.push(fbIssue("high", "内容", "字数偏少", "目标约 " + target + " 词，当前 " + stats.wc + " 词。先补足信息点，再润色语言。", ""));
+      else if (stats.wc > target * 1.5) issues.push(fbIssue("mid", "内容", "篇幅偏长", "当前 " + stats.wc + " 词，目标约 " + target + " 词。检查是否有重复解释。", ""));
+
+      if (kind === "small") {
+        if (!format.isNotice && !format.hasDear) issues.push(fbIssue("high", "格式", "缺少称呼", "书信开头用 Dear ...；不知道姓名时用 Dear Sir or Madam。", fbExcerpt(text, format.first, 56)));
+        if (!format.isNotice && !format.hasClosing && !format.orgSignature) issues.push(fbIssue("high", "格式", "缺少结尾敬语", "根据收信人使用 Yours sincerely / Yours faithfully。", fbTail(text, 56)));
+        if (!format.isNotice && !format.hasSignature) issues.push(fbIssue("mid", "格式", "缺少署名", "结尾另起一行写 Li Ming 或题目指定姓名。", fbTail(text, 56)));
+        if (format.isNotice && !format.hasNoticeHeading) issues.push(fbIssue("high", "格式", "缺少 NOTICE 标题", "通知通常以 NOTICE 居中开头，再写正文。", fbExcerpt(text, format.first, 56)));
+        if (!format.hasPurpose) issues.push(fbIssue("mid", "内容", "写信目的不够明确", "开头直接说明为什么写这封信，不要绕背景。", ""));
+        if (politeRequired && !format.hasPolite) issues.push(fbIssue("mid", "语气", "语气偏直接", "加入 I would be grateful / Could you please 等礼貌表达。", ""));
+        if (cueHits.length < 2 && coverage < 0.25) {
+          issues.push(fbIssue("mid", "内容", "信息点可能不完整", (SMALL_TYPE_HINTS[item.type] || "按题目要求补齐时间、地点、原因、请求等细节") + "。", ""));
+        }
+      } else {
+        if (stats.paras.length < 3) issues.push(fbIssue("high", "结构", "段落层次不足", "大作文建议三段：描述/分析/建议。当前 " + stats.paras.length + " 段。", ""));
+        if (coverage < 0.15 && stats.wc >= 60) issues.push(fbIssue("mid", "内容", "主题词覆盖偏低", "与范文主题词重合较少，检查是否偏题；如果你用了同义改写，可忽略此条。", ""));
+      }
+
+      if (kind !== "small" && stats.connectives.length < 3) issues.push(fbIssue("mid", "结构", "逻辑连接偏少", "尝试用 however / therefore / while 等把句子关系说清楚，不要每句都加。", ""));
+      if (kind !== "small" && stats.complexCount === 0) issues.push(fbIssue("mid", "语言", "句式偏单一", "加入一个定语从句、状语从句或非谓语结构，但不要冒险写没把握的句子。", ""));
+      if (stats.avgSent > 30) issues.push(fbIssue("mid", "语言", "长句偏多", "平均句长 " + stats.avgSent.toFixed(1) + " 词，适当拆成短句，考场上更稳。", ""));
+      if (stats.repeats.length) {
+        issues.push(fbIssue("mid", "语言", "高频词重复", stats.repeats.map(function (r) { return r.word + " ×" + r.count; }).join("；") + "。换用同义表达或代词。", ""));
+      }
+      if (stats.cliches.length) issues.push(fbIssue("mid", "语言", "模板化表达", stats.cliches.slice(0, 3).join("；") + "。换成具体背景或具体动作。", ""));
+      if (stats.contractions.length) issues.push(fbIssue("mid", "语言", "正式写作避免缩写", stats.contractions.slice(0, 3).join("；") + "。写成完整形式。", ""));
+
+      spelling.slice(0, 3).forEach(function (x) { issues.push(x); });
+      grammar.slice(0, 3).forEach(function (x) { issues.push(x); });
+      mechanics.slice(0, 3).forEach(function (x) { issues.push(x); });
+    }
+
+    const good = [];
+    if (String(text || "").trim()) {
+      if (stats.wc >= target * 0.8 && stats.wc <= target * 1.5) good.push(fbIssue("good", "内容", "字数在目标范围", "当前 " + stats.wc + " 词，符合 " + target + " 词左右的要求。", ""));
+      if (kind === "big" && stats.paras.length >= 3) good.push(fbIssue("good", "结构", "段落层次清楚", "已经分成 " + stats.paras.length + " 段，便于展开描述、分析和建议。", ""));
+      if (kind === "small" && stats.paras.length >= 2) good.push(fbIssue("good", "结构", "分段清楚", "正文没有挤成一段，读者更容易抓住信息点。", ""));
+      if (stats.connectives.length >= 4) good.push(fbIssue("good", "结构", "逻辑连接有变化", "使用了 " + stats.connectives.length + " 类连接表达，句间关系比较清楚。", ""));
+      if (stats.complexCount >= 2) good.push(fbIssue("good", "语言", "有复杂句尝试", "出现了 " + stats.complexCount + " 个含从句或复杂结构的句子。", ""));
+      if (coverage >= 0.3) good.push(fbIssue("good", "内容", "主题词覆盖较好", "与范文主题词覆盖 " + fbPct(coverage) + "，偏题风险较低。", ""));
+    }
+    if (!issues.length && good.length === 0) good.push(fbIssue("good", "整体", "没有发现明显的表面问题", "继续对照范文检查内容深度、论证和逻辑。", ""));
+
+    const dimRows = dims.map(function (d) {
+      return {
+        key: d.key,
+        label: d.label,
+        max: d.max,
+        score: Math.max(0, Math.min(d.max, Number(scores[d.key]) || 0)),
+        reason: fbDimReason(d.key, stats, coverage, cues, cueHits, spelling, grammar, mechanics)
+      };
+    });
+    const total = dimRows.reduce(function (s, d) { return s + d.score; }, 0);
+    const highCount = issues.filter(function (x) { return x.level === "high"; }).length;
+    const midCount = issues.filter(function (x) { return x.level === "mid"; }).length;
+    const report = {
+      id: opts.id || "draft:" + (opts.key || ""),
+      key: opts.key || "",
+      kind: kind,
+      title: kind === "small" ? "小作文自动检查" : "大作文自动检查",
+      total: total,
+      max: max,
+      dims: dimRows,
+      stats: {
+        wc: stats.wc,
+        paras: stats.paras.length,
+        sents: stats.sents.length,
+        avgSent: stats.avgSent,
+        connectives: stats.connectives.length,
+        coverage: coverage,
+        uniqueRatio: stats.uniqueRatio,
+        errors: spelling.length + grammar.length + mechanics.length
+      },
+      issues: fbSortIssues(issues).slice(0, 10),
+      good: good.slice(0, 3),
+      highCount: highCount,
+      midCount: midCount,
+      suggested: dimRows.reduce(function (o, d) { o[d.key] = d.score; return o; }, {})
+    };
+    const plain = [];
+    plain.push("研墨 · " + report.title);
+    plain.push("建议分：" + total + " / " + max);
+    plain.push("词数：" + stats.wc + "；段落：" + stats.paras.length + "；平均句长：" + stats.avgSent.toFixed(1) + "；主题词覆盖：" + fbPct(coverage));
+    dimRows.forEach(function (d) { plain.push(d.label + "：" + d.score + " / " + d.max + "（" + d.reason + "）"); });
+    if (report.good.length) {
+      plain.push("做得好的地方：");
+      report.good.forEach(function (x) { plain.push("- " + x.title + "：" + x.detail); });
+    }
+    if (report.issues.length) {
+      plain.push("需要处理：");
+      report.issues.forEach(function (x) { plain.push("- [" + x.level + "] " + x.title + "：" + x.detail + (x.excerpt ? "（" + x.excerpt + "）" : "")); });
+    }
+    plain.push("说明：离线初检只判断字数、结构、连接、拼写等可计算特征；内容深度和逻辑仍以老师/自评为准。");
+    report.plain = plain.join("\n");
+    return report;
+  }
+
+  function fbTermHit(text, cn) {
+    const t = String(text || "").replace(/\s/g, "");
+    const clean = String(cn || "").replace(/[（(][^）)]*[）)]/g, "").replace(/[“”"'‘’]/g, "").trim();
+    if (!clean) return false;
+    if (t.indexOf(clean) !== -1) return true;
+    const parts = clean.split(/[\/、；;，,]/).map(function (s) { return s.trim(); }).filter(function (s) { return s.length >= 2; });
+    if (parts.some(function (p) { return t.indexOf(p) !== -1; })) return true;
+    if (clean.length >= 3) {
+      if (t.indexOf(clean.slice(0, 2)) !== -1) return true;
+      if (t.indexOf(clean.slice(-2)) !== -1) return true;
+    }
+    return false;
+  }
+
+  function fbChineseBigrams(text) {
+    const chars = Array.from(String(text || "").replace(/[^\u4e00-\u9fa5]/g, ""));
+    const set = new Set();
+    for (let i = 0; i < chars.length - 1; i++) set.add(chars[i] + chars[i + 1]);
+    return set;
+  }
+
+  function fbDice(a, b) {
+    const A = fbChineseBigrams(a);
+    const B = fbChineseBigrams(b);
+    if (!A.size || !B.size) return 0;
+    let inter = 0;
+    A.forEach(function (x) { if (B.has(x)) inter++; });
+    return 2 * inter / (A.size + B.size);
+  }
+
+  function fbPunctuationIssues(text) {
+    const out = [];
+    const t = String(text || "");
+    if (/[\u4e00-\u9fa5][,;:][\u4e00-\u9fa5]/.test(t)) out.push(fbIssue("mid", "规范", "中文之间用了英文标点", "逗号、分号、冒号改成中文标点。", fbExcerpt(t, (t.match(/[\u4e00-\u9fa5][,;:][\u4e00-\u9fa5]/) || [""])[0], 40)));
+    if (/[\u4e00-\u9fa5]\.(?:\s|$)/.test(t)) out.push(fbIssue("mid", "规范", "中文句末用了英文句号", "句号改成“。”。", ""));
+    if (countChars(t) > 30 && !/[。！？；]/.test(t)) out.push(fbIssue("mid", "规范", "缺少中文断句", "长译文没有句号或分号，读起来容易喘不过气。", ""));
+    if (/[\u4e00-\u9fa5]\s+[\u4e00-\u9fa5]/.test(t)) out.push(fbIssue("low", "规范", "汉字之间多了空格", "中文正文不需要在字与字之间加空格。", ""));
+    if ((t.match(/\(/g) || []).length !== (t.match(/\)/g) || []).length) out.push(fbIssue("low", "规范", "括号不配对", "检查左右括号是否成对。", ""));
+    return out;
+  }
+
+  function fbTranslationIssues(text, stats, terms, coverage, overlap) {
+    const issues = [];
+    if (!String(text || "").trim()) {
+      issues.push(fbIssue("high", "内容", "还没有写译文", "先自己译一遍，再对照参考译文检查。", ""));
+      return issues;
+    }
+    if (stats.english.length) {
+      issues.push(fbIssue("high", "内容", "还有英文未译", stats.english.slice(0, 4).join("、") + "。确认是否为有意保留的术语；否则译成中文。", ""));
+    }
+    if (stats.cnChars === 0) issues.push(fbIssue("high", "内容", "译文里没有中文", "这段练习要求译成中文，不是英文复述。", ""));
+    if (stats.ratio < 0.5) issues.push(fbIssue("high", "内容", "译文明显偏短", "当前 " + stats.chars + " 字，参考约 " + stats.refChars + " 字，可能漏译。", ""));
+    else if (stats.ratio > 1.8) issues.push(fbIssue("mid", "内容", "译文明显偏长", "当前 " + stats.chars + " 字，参考约 " + stats.refChars + " 字，检查是否重复解释。", ""));
+    if (terms.length && coverage < 1) {
+      const miss = terms.filter(function (t) { return !t.hit; });
+      issues.push(fbIssue(coverage < 0.5 ? "high" : "mid", "内容", "可能漏译的术语", miss.slice(0, 5).map(function (t) { return t.en + "（" + t.cn + "）"; }).join("；") + "。同义改写可忽略。", ""));
+    }
+    if (stats.sents.length < Math.max(1, stats.refSents * 0.6)) {
+      issues.push(fbIssue("mid", "语言", "断句偏少", "当前 " + stats.sents.length + " 句，参考约 " + stats.refSents + " 句。适当拆句，避免一句到底。", ""));
+    }
+    if (stats.maxSent > 100) issues.push(fbIssue("mid", "语言", "单句过长", "最长一句约 " + stats.maxSent + " 字，中文里适当断开。", ""));
+    if (stats.deRatio > 0.14 && stats.cnChars > 40) issues.push(fbIssue("low", "语言", "“的”字偏多", "“的”字密度约 " + fbPct(stats.deRatio) + "，试着把名词化结构改成动词或短句。", ""));
+    if (stats.repeated.length) issues.push(fbIssue("low", "规范", "连续重复字", stats.repeated.slice(0, 4).join("、") + "。检查是否笔误或表达啰嗦。", ""));
+    fbPunctuationIssues(text).forEach(function (x) { issues.push(x); });
+    if (coverage < 0.5 && overlap < 0.15) issues.push(fbIssue("low", "内容", "与参考表达重合较低", "可能是同义改写，也可能是漏掉了关键结构；对照参考译文再确认。", ""));
+    return issues;
+  }
+
+  function translationFeedback(text, entry, key) {
+    const isPassage = String(key || "").charAt(0) === "p";
+    const ref = (entry && entry.ref) || "";
+    const t = String(text || "");
+    const chars = countChars(t);
+    const refChars = countChars(ref);
+    const cnChars = (t.match(/[\u4e00-\u9fa5]/g) || []).length;
+    const sents = t.split(/[。！？!?；;]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    const refSents = ref.split(/[。！？!?；;]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    const english = Array.from(new Set((t.match(/[A-Za-z]{4,}/g) || []).map(function (w) { return w; })));
+    const maxSent = sents.length ? Math.max.apply(null, sents.map(function (s) { return countChars(s); })) : 0;
+    const deRatio = cnChars ? (t.match(/的/g) || []).length / cnChars : 0;
+    const repeated = Array.from(new Set((t.match(/([\u4e00-\u9fa5])\1{2,}/g) || [])));
+    const stats = {
+      chars: chars,
+      refChars: refChars,
+      cnChars: cnChars,
+      ratio: refChars ? chars / refChars : 0,
+      sents: sents,
+      refSents: refSents.length,
+      maxSent: maxSent,
+      deRatio: deRatio,
+      repeated: repeated,
+      english: english
+    };
+    // 词表是提示，不是官方采分点。只把参考译文里确实出现的表达计入覆盖率，
+    // 避免参考译文本身被同义改写误判为“漏译”。
+    const terms = ((entry && entry.words) || []).map(function (w) {
+      return { en: w[0], cn: w[1], hit: fbTermHit(t, w[1]), required: fbTermHit(ref, w[1]) };
+    }).filter(function (x) { return x.required; });
+    const coverage = terms.length ? terms.filter(function (x) { return x.hit; }).length / terms.length : 1;
+    const overlap = fbDice(t, ref);
+    let lengthQuality = 1;
+    if (stats.ratio < 0.35 || stats.ratio > 2.2) lengthQuality = 0.15;
+    else if (stats.ratio < 0.5 || stats.ratio > 1.8) lengthQuality = 0.45;
+    else if (stats.ratio < 0.7 || stats.ratio > 1.5) lengthQuality = 0.7;
+    else if (stats.ratio < 0.8 || stats.ratio > 1.35) lengthQuality = 0.85;
+    let accuracyQuality = 1;
+    if (english.length) accuracyQuality -= Math.min(0.5, english.length * 0.15);
+    if (cnChars === 0 && t.trim()) accuracyQuality = 0;
+    const punct = fbPunctuationIssues(t);
+    accuracyQuality -= punct.filter(function (x) { return x.level === "mid"; }).length * 0.07;
+    accuracyQuality -= punct.filter(function (x) { return x.level === "low"; }).length * 0.03;
+    accuracyQuality -= repeated.length * 0.04;
+    if (maxSent > 100) accuracyQuality -= 0.1;
+    accuracyQuality = Math.max(0, Math.min(1, accuracyQuality));
+    const quality = coverage * 0.55 + lengthQuality * 0.2 + accuracyQuality * 0.25;
+    let suggested = isPassage ? Math.round(quality * 15 * 2) / 2 : null;
+    if (isPassage) {
+      if (cnChars === 0 && t.trim()) suggested = 0;
+      if (english.length) suggested = Math.min(suggested, 8);
+      if (stats.ratio < 0.35) suggested = Math.min(suggested, 2);
+      else if (stats.ratio < 0.5) suggested = Math.min(suggested, 5);
+    }
+    const issues = fbTranslationIssues(t, stats, terms, coverage, overlap);
+    const hasHigh = issues.some(function (x) { return x.level === "high"; });
+    const good = [];
+    if (t.trim()) {
+      if (terms.length && coverage >= 0.8) good.push(fbIssue("good", "内容", "术语覆盖较好", "参考术语命中 " + terms.filter(function (x) { return x.hit; }).length + " / " + terms.length + "。", ""));
+      if (!hasHigh && stats.ratio >= 0.7 && stats.ratio <= 1.4) good.push(fbIssue("good", "内容", "篇幅接近参考", "当前 " + chars + " 字，参考约 " + refChars + " 字。", ""));
+      if (!english.length && cnChars > 0) good.push(fbIssue("good", "内容", "没有残留英文", "译文完整使用中文表达。", ""));
+      if (!hasHigh && stats.sents.length >= Math.max(1, stats.refSents * 0.7)) good.push(fbIssue("good", "语言", "断句基本合理", "当前 " + stats.sents.length + " 句，参考约 " + stats.refSents + " 句。", ""));
+      if (!hasHigh && coverage >= 0.6 && overlap >= 0.4) good.push(fbIssue("good", "语言", "参考表达重合较高", "与参考译文的用词和结构接近。", ""));
+    }
+    if (!issues.length && !good.length) good.push(fbIssue("good", "整体", "没有发现明显的表面问题", "继续对照参考译文检查语气和细节。", ""));
+    const report = {
+      id: "trans:" + key,
+      key: key,
+      isPassage: isPassage,
+      title: isPassage ? "段落翻译自动检查" : "句子翻译自动检查",
+      suggested: suggested,
+      max: isPassage ? 15 : null,
+      terms: terms,
+      coverage: coverage,
+      overlap: overlap,
+      stats: stats,
+      issues: fbSortIssues(issues).slice(0, 10),
+      good: good.slice(0, 3),
+      highCount: issues.filter(function (x) { return x.level === "high"; }).length,
+      midCount: issues.filter(function (x) { return x.level === "mid"; }).length
+    };
+    const plain = [];
+    plain.push("研墨 · " + report.title);
+    if (isPassage) plain.push("机器建议分：" + suggested + " / 15");
+    plain.push("字数：" + chars + "；参考：" + refChars + " 字；句数：" + sents.length + "；参考句数：" + refSents.length);
+    plain.push(terms.length ? "术语覆盖：" + terms.filter(function (x) { return x.hit; }).length + " / " + terms.length + "；参考表达重合：" + fbPct(overlap) : "术语表：参考译文没有可直接核对的词对；参考表达重合：" + fbPct(overlap));
+    if (terms.length) plain.push("术语：" + terms.map(function (x) { return x.en + "（" + x.cn + "）" + (x.hit ? "已覆盖" : "可能漏译"); }).join("；"));
+    if (report.good.length) {
+      plain.push("做得好的地方：");
+      report.good.forEach(function (x) { plain.push("- " + x.title + "：" + x.detail); });
+    }
+    if (report.issues.length) {
+      plain.push("需要处理：");
+      report.issues.forEach(function (x) { plain.push("- [" + x.level + "] " + x.title + "：" + x.detail + (x.excerpt ? "（" + x.excerpt + "）" : "")); });
+    }
+    plain.push("说明：机器只检查术语、完整度、断句和标点，语义准确度仍需对照参考译文。");
+    report.plain = plain.join("\n");
+    return report;
+  }
+
+  function feedbackIssuesHtml(report) {
+    const items = [];
+    report.issues.forEach(function (x) {
+      items.push('<div class="check-issue ' + x.level + '"><span class="check-tag">' + (x.level === "high" ? "高" : x.level === "mid" ? "中" : "低") + '</span><div><b>' + esc(x.title) + '</b><p>' + esc(x.detail) + (x.excerpt ? '<em>“' + esc(x.excerpt) + '”</em>' : "") + '</p></div></div>');
+    });
+    report.good.forEach(function (x) {
+      items.push('<div class="check-issue good"><span class="check-tag">好</span><div><b>' + esc(x.title) + '</b><p>' + esc(x.detail) + '</p></div></div>');
+    });
+    return items.join("");
+  }
+
+  function feedbackStatsHtml(items) {
+    return '<div class="check-stats">' + items.map(function (x) {
+      return '<div class="check-stat"><b>' + esc(x[1]) + '</b><span>' + esc(x[0]) + '</span></div>';
+    }).join("") + '</div>';
+  }
+
+  function writingFeedbackHtml(report, opts) {
+    const allowApply = !opts || opts.apply !== false;
+    const dims = report.dims.map(function (d) {
+      const pct = d.max ? Math.round(d.score / d.max * 100) : 0;
+      return '<div class="check-dim" title="' + esc(d.reason) + '"><span>' + esc(d.label) + '</span><span class="check-bar"><i style="width:' + pct + '%"></i></span><b>' + d.score + ' / ' + d.max + '</b></div>';
+    }).join("");
+    const summary = report.highCount
+      ? "先处理 " + report.highCount + " 个高优先级问题"
+      : (report.midCount ? "再优化 " + report.midCount + " 个中优先级问题" : "表面问题较少，继续打磨内容");
+    return '<div class="check-summary"><div><span>机器建议分</span><b>' + report.total + ' / ' + report.max + '</b></div><span>' + esc(summary) + '</span></div>' +
+      feedbackStatsHtml([
+        ["词数", String(report.stats.wc)],
+        ["段落", String(report.stats.paras)],
+        ["平均句长", report.stats.avgSent.toFixed(1)],
+        ["主题覆盖", fbPct(report.stats.coverage)]
+      ]) +
+      '<div class="check-dims">' + dims + '</div>' +
+      '<div class="check-issues">' + feedbackIssuesHtml(report) + '</div>' +
+      '<div class="check-actions">' + (allowApply ? '<button class="text-link" data-action="apply-draft-score" data-id="' + esc(report.id) + '">把建议分填入自评</button>' : '') + '<button class="text-link muted" data-action="copy-feedback" data-id="' + esc(report.id) + '">复制报告</button></div>' +
+      '<p class="check-note">离线初检只判断字数、结构、连接、拼写等可计算特征；内容深度和逻辑仍以老师/自评为准。</p>';
+  }
+
+  function translationFeedbackHtml(report) {
+    const terms = report.terms.map(function (t) {
+      return '<span class="check-term ' + (t.hit ? "on" : "off") + '">' + esc(t.en) + ' · ' + esc(t.cn) + '</span>';
+    }).join("");
+    const summary = report.isPassage
+      ? '<div class="check-summary"><div><span>机器建议分</span><b>' + report.suggested + ' / 15</b></div><span>' + esc(report.highCount ? "先处理 " + report.highCount + " 个高优先级问题" : (report.midCount ? "再优化 " + report.midCount + " 个中优先级问题" : "完整度与术语覆盖较好")) + '</span></div>'
+      : '<div class="check-summary"><div><span>术语覆盖</span><b>' + (report.terms.length ? Math.round(report.coverage * 100) + "%" : "—") + '</b></div><span>' + esc(report.highCount ? "先处理 " + report.highCount + " 个高优先级问题" : "继续对照参考译文") + '</span></div>';
+    return summary +
+      feedbackStatsHtml([
+        ["字数", String(report.stats.chars)],
+        ["参考字数", String(report.stats.refChars)],
+        ["句数", String(report.stats.sents.length)],
+        ["参考重合", fbPct(report.overlap)]
+      ]) +
+      (terms ? '<div class="check-terms">' + terms + '</div>' : "") +
+      '<div class="check-issues">' + feedbackIssuesHtml(report) + '</div>' +
+      '<div class="check-actions"><button class="text-link muted" data-action="copy-feedback" data-id="' + esc(report.id) + '">复制报告</button></div>' +
+      '<p class="check-note">机器只检查术语、完整度、断句和标点；语义准确度仍需对照参考译文。</p>';
+  }
+
+  function runDraftFeedback(key, kind, i) {
+    const ta = document.querySelector('[data-draft="' + key + '"]');
+    const text = ta ? ta.value : (state.drafts[key] || "");
+    const item = (window.WRITING[kind] || [])[i] || {};
+    const dims = draftSelfDims(kind);
+    const max = dims.reduce(function (s, d) { return s + d.max; }, 0);
+    const target = kind === "small" ? 100 : 160;
+    const report = writingFeedback(text, { kind: kind, item: item, dims: dims, max: max, target: target, key: key, id: "draft:" + key });
+    feedbackCache[report.id] = report;
+    const box = document.querySelector('[data-draft-result="' + key + '"]');
+    if (box) {
+      box.classList.remove("stale");
+      box.innerHTML = writingFeedbackHtml(report);
+    }
+  }
+
+  function runTransFeedback(key) {
+    const ta = document.querySelector('[data-trans-input="' + key + '"]');
+    const text = ta ? ta.value : transValue(key);
+    const entry = transEntryByKey(key);
+    if (!entry) return;
+    const report = translationFeedback(text, entry, key);
+    feedbackCache[report.id] = report;
+    const box = document.querySelector('[data-trans-result="' + key + '"]');
+    if (box) {
+      box.classList.remove("stale");
+      box.innerHTML = translationFeedbackHtml(report);
+    }
+  }
+
+  function markCheckStale(selector) {
+    const box = document.querySelector(selector);
+    if (box && String(box.innerHTML || "").trim()) box.classList.add("stale");
+  }
+
+  function runExamWritingFeedback(recId, kind) {
+    const rec = state.exams.find(function (r) { return String(r.id) === String(recId); });
+    if (!rec) return;
+    const paper = mockPaper(rec.paperId);
+    if (!paper) return;
+    const type = mockType(paper.type);
+    const isA = kind === "wa";
+    const item = isA ? (window.WRITING.small || [])[paper.writing.small] : (window.WRITING.big || [])[paper.writing.big];
+    const text = isA ? rec.answers.writingA : rec.answers.writingB;
+    const dims = isA ? WRITING_A_DIMS : writingBDims(paper);
+    const max = isA ? type.writingA : type.writingB;
+    const target = isA ? 100 : (parseInt(type.writingWords, 10) || 160);
+    const report = writingFeedback(text, {
+      kind: isA ? "small" : "big",
+      item: item || {},
+      dims: dims,
+      max: max,
+      target: target,
+      key: rec.id + "-" + kind,
+      id: "exam:" + rec.id + ":" + kind
+    });
+    feedbackCache[report.id] = report;
+    const box = document.querySelector('[data-exam-writing-result="' + rec.id + "-" + kind + '"]');
+    if (box) box.innerHTML = writingFeedbackHtml(report, { apply: false });
+  }
+
+  function runExamTransFeedback(recId, which) {
+    const rec = state.exams.find(function (r) { return String(r.id) === String(recId); });
+    if (!rec) return;
+    const paper = mockPaper(rec.paperId);
+    if (!paper) return;
+    let entry = null;
+    let text = "";
+    let key = "";
+    let boxKey = "";
+    if (which === "p") {
+      entry = transEntryByKey("p" + paper.translation.id);
+      text = rec.answers.translation || "";
+      key = "p" + paper.translation.id + "@" + rec.id;
+      boxKey = rec.id + "-p";
+    } else {
+      const i = Number(which);
+      const id = (paper.translation.ids || [])[i];
+      entry = (window.TRANSLATIONS.sentences || []).find(function (s) { return s.id === Number(id); });
+      text = (rec.answers.translationS || [])[i] || "";
+      key = "s" + id + "@" + rec.id;
+      boxKey = rec.id + "-s" + i;
+    }
+    if (!entry) return;
+    const report = translationFeedback(text, entry, key);
+    feedbackCache[report.id] = report;
+    const box = document.querySelector('[data-exam-trans-result="' + boxKey + '"]');
+    if (box) box.innerHTML = translationFeedbackHtml(report);
   }
 
   /* ------------------------------------------------------------------
@@ -4775,6 +5648,14 @@
         </div>
         <div class="prompt-box"><span class="label">题目</span><p>${esc(item ? (isA ? item.scene : item.kind + " · " + item.topic + "。" + item.prompt) : "")}</p></div>
         <div class="exam-user-text">${text.trim() ? esc(text) : "<span class=\"muted\">这次没有写这一篇。</span>"}</div>
+        <div class="check-box">
+          <div class="check-bar">
+            <span class="label">自动检查</span>
+            <span class="check-hint">离线初检 · 不替代老师</span>
+            <button class="text-link" data-action="check-exam-writing" data-id="${esc(rec.id)}" data-kind="${kind}">检查这篇</button>
+          </div>
+          <div class="check-result" data-exam-writing-result="${esc(rec.id)}-${kind}" aria-live="polite"></div>
+        </div>
         <div class="rubric-box">
           <div class="rubric-head"><h3>自评维度</h3><span>自评 ${got} / ${max}</span></div>
           ${rows}
@@ -4806,6 +5687,14 @@
             <p class="trans-en">${esc(s ? s.en : "")}</p>
             <div class="exam-user-text">${user.trim() ? esc(user) : "<span class=\"muted\">未作答。</span>"}</div>
             <div class="self-ref"><b>参考</b><p>${esc(s ? s.ref : "")}</p></div>
+            <div class="check-box">
+              <div class="check-bar">
+                <span class="label">自动检查</span>
+                <span class="check-hint">术语与完整度初检</span>
+                <button class="text-link" data-action="check-exam-trans-sentence" data-id="${esc(rec.id)}" data-i="${i}">检查译文</button>
+              </div>
+              <div class="check-result" data-exam-trans-result="${esc(rec.id)}-s${i}" aria-live="polite"></div>
+            </div>
             <div class="rubric-inline"><span>逐句自评</span>${pick}<em>${score} / 2</em></div>
           </article>`;
       }).join("");
@@ -4829,6 +5718,14 @@
         <div class="self-block-head"><h3>翻译自评 · ${type.translation} 分</h3><span>对照参考译文，逐条勾选真正译出的采分点</span></div>
         <div class="prompt-box"><span class="label">你的译文</span><p class="exam-user-text inline">${value.trim() ? esc(value) : "<span class=\"muted\">未作答。</span>"}</p></div>
         <div class="self-ref"><b>参考译文</b><p>${esc(entry ? entry.ref : "")}</p></div>
+        <div class="check-box">
+          <div class="check-bar">
+            <span class="label">自动检查</span>
+            <span class="check-hint">术语与完整度初检 · 不替代参考译文</span>
+            <button class="text-link" data-action="check-exam-trans-passage" data-id="${esc(rec.id)}">检查译文</button>
+          </div>
+          <div class="check-result" data-exam-trans-result="${esc(rec.id)}-p" aria-live="polite"></div>
+        </div>
         <ul class="point-list">${checks}</ul>
         <p class="self-score-line">已勾选 <b>${checked}</b> / ${points.length} 个采分点 · 自评 <b>${examScoreText(score)}</b> / ${type.translation} 分</p>
       </div>`;
@@ -6575,6 +7472,45 @@
         markTask(3, true);
         break;
       }
+      case "check-trans": {
+        if (data.key) runTransFeedback(data.key);
+        break;
+      }
+      case "check-draft": {
+        const key = data.key;
+        if (!key) break;
+        const kind = data.kind || (key.indexOf("small-") === 0 ? "small" : "big");
+        const i = Number.isInteger(Number(data.i)) ? Number(data.i) : Number(String(key).split("-").pop());
+        runDraftFeedback(key, kind, i);
+        break;
+      }
+      case "check-exam-writing": {
+        if (data.id && data.kind) runExamWritingFeedback(data.id, data.kind);
+        break;
+      }
+      case "check-exam-trans-sentence": {
+        if (data.id) runExamTransFeedback(data.id, data.i);
+        break;
+      }
+      case "check-exam-trans-passage": {
+        if (data.id) runExamTransFeedback(data.id, "p");
+        break;
+      }
+      case "copy-feedback": {
+        const report = feedbackCache[data.id];
+        if (report) copyThen(report.plain, "检查报告已复制");
+        break;
+      }
+      case "apply-draft-score": {
+        const report = feedbackCache[data.id];
+        if (!report || !report.suggested || !report.key) break;
+        state.draftSelf[report.key] = Object.assign({}, report.suggested);
+        save();
+        updateDraftSelfDom(report.key);
+        markTask(3, true);
+        toast("已填入建议分，可再调整");
+        break;
+      }
       case "trans-passage": {
         const id = Number(data.id);
         if (id) { ui.transPassage = id; rerender(); }
@@ -6876,6 +7812,7 @@
         save();
         const counter = document.querySelector('[data-trans-count="' + key + '"]');
         if (counter) counter.textContent = "已写 " + countChars(t.value) + " 字";
+        markCheckStale('[data-trans-result="' + key + '"]');
         return;
       }
 
@@ -6886,6 +7823,7 @@
         const counter = document.querySelector('[data-draft-count="' + key + '"]');
         const n = wordCount(t.value);
         if (counter) counter.textContent = n + " 词";
+        markCheckStale('[data-draft-result="' + key + '"]');
         if (n >= 50) markTask(3, true);
       }
     });
