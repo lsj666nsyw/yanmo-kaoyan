@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="light">
+<meta name="theme-color" content="#98392a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="研墨">
+<meta name="format-detection" content="telephone=no">
 <meta name="description" content="研墨 · 考研英语精读手册：词汇、长难句、阅读、完形、翻译、写作与备考规划。">
 <title>研墨 · 考研英语</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%2398392a'/%3E%3Ctext x='32' y='46' font-family='Georgia,serif' font-size='40' fill='%23f7f5ef' text-anchor='middle'%3E%E7%A0%94%3C/text%3E%3C/svg%3E">
@@ -52,8 +58,33 @@
     </div>
   </aside>
 
-  <main class="main" id="main" tabindex="-1"></main>
+  <main class="main" id="main" tabindex="-1">
+    <div class="boot-loading" role="status" aria-live="polite">
+      <p class="boot-mark" aria-hidden="true">研</p>
+      <p class="boot-title">正在打开词库</p>
+      <p class="boot-copy">首次打开需要几秒，之后会更快。学习记录只保存在这台设备上。</p>
+      <noscript><p class="boot-copy">需要开启 JavaScript 才能使用。</p></noscript>
+    </div>
+  </main>
 </div>
+
+<nav class="mobile-tabs" aria-label="手机主导航">
+  <a href="#/home" data-nav="home">今日</a>
+  <a href="#/vocab" data-nav="vocab">词汇</a>
+  <a href="#/reading" data-nav="reading">阅读</a>
+  <a href="#/exam" data-nav="exam">模考</a>
+  <a href="#/me" data-nav="me">我的</a>
+  <details class="mobile-more">
+    <summary>更多</summary>
+    <div class="mobile-more-menu">
+      <a href="#/sentences" data-nav="sentences">长难句</a>
+      <a href="#/cloze" data-nav="cloze">完形 · 新题型</a>
+      <a href="#/translation" data-nav="translation">翻译</a>
+      <a href="#/writing" data-nav="writing">写作</a>
+      <a href="#/plan" data-nav="plan">真题与规划</a>
+    </div>
+  </details>
+</nav>
 
 <div class="backdrop" id="backdrop" data-action="close-drawer" hidden></div>
 <aside class="drawer" id="drawer" aria-hidden="true" aria-label="词条详情"></aside>

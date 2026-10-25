@@ -9,6 +9,7 @@ const path = require("path");
 
 const root = __dirname;
 const outFile = path.join(root, "研墨-考研英语.html");
+const mobileFile = path.join(root, "yanmo-kaoyan-mobile.html");
 
 let html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 
@@ -31,4 +32,6 @@ const note = "<!-- 研墨 · 考研英语（单文件版）｜由 build-single.j
 html = html.replace("<!doctype html>\n", "<!doctype html>\n" + note);
 
 fs.writeFileSync(outFile, html, "utf8");
+fs.writeFileSync(mobileFile, html, "utf8");
 console.log("已生成", outFile, (fs.statSync(outFile).size / 1024).toFixed(0) + " KB");
+console.log("手机版", mobileFile, (fs.statSync(mobileFile).size / 1024).toFixed(0) + " KB");

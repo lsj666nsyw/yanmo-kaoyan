@@ -2,7 +2,7 @@
   "use strict";
 
   // 显示在页脚与语音自检里，方便确认手机上跑的是不是最新版本
-  const APP_BUILD = "2026-10-25.2";
+  const APP_BUILD = "2026-10-25.4";
 
   /* ------------------------------------------------------------------
      data
@@ -1765,7 +1765,7 @@
             <p class="timer-note">完成一整段，时间才计入今日统计。</p>
           </div>
 
-          ${homeNextStep()}
+          ${homeFocusPanel()}
 
           <section class="rail-block">
             <div class="rail-head"><h3>本周专注</h3><span>${weekTotal} 分钟</span></div>
@@ -1839,6 +1839,8 @@
         </div>
         ${due ? `<button class="btn btn-solid" data-action="start-review">开始复习</button>` : ""}
       </div>
+
+      ${reviewForecastLine()}
 
       <p class="vocab-note">每个词条按“用法—搭配—例句—辨析”整理。点开任意单词即可看完整卡片；卡片背面也会带一句用法和例句，不再只给中文释义。</p>
 
@@ -2302,6 +2304,11 @@
     $$("[data-nav]").forEach(function (a) {
       a.classList.toggle("active", a.getAttribute("data-nav") === route.name);
     });
+    const mobileMore = document.querySelector(".mobile-more");
+    if (mobileMore) {
+      mobileMore.open = false;
+      mobileMore.classList.toggle("active", ["sentences", "cloze", "translation", "writing", "plan"].indexOf(route.name) !== -1);
+    }
     updateSidebar();
     document.title = (PAGE_TITLES[route.name] || "研墨") + " · 研墨";
 
@@ -2725,23 +2732,51 @@
       </section>`;
   }
 
-  function homeNextStep() {
-    const d = readingDiagnosis();
-    if (!d.answered) {
-      return `
-        <section class="rail-block rail-next">
-          <div class="rail-head"><h3>下一步</h3><span>阅读诊断</span></div>
-          <p class="next-kicker">还没有阅读记录</p>
-          <p class="next-title">先做一篇，建立诊断</p>
-          <p class="next-copy">提交后这里会给出：优先补哪类题、回看哪道题、依据找得准不准。</p>
-          <a class="text-link" href="#/reading">先做 Reading 01 →</a>
-        </section>`;
-    }
-    const focus = d.focus;
-    const target = d.target;
-    let kicker = "当前稳定";
-    let title = "保持限时训练";
-    let copy = "题型正确率与依据定位都稳定。下一步限时做一篇，把速度压到 18 分钟。";
+  /* ------------------------------------------------------------------
+     learning loop 2.0：诊断 / 掌握度 / 自适应任务 / 复习排期
+  ------------------------------------------------------------------ */
+
+  function masteryNum(v) {
+    if (v == null || !Number.isFinite(Number(v))) return "—";
+    const n = Math.max(0, Math.min(100, Number(v)));
+    if (n > 0 && n < 1) return "<1";
+    return String(Math.round(n));
+  }
+
+  function masteryStatus(v) {
+    if (v == null) return { label: "待建立", cls: "empty" };
+    if (v >= 80) return { label: "稳定", cls: "solid" };
+    if (v >= 65) return { label: "接近稳定", cls: "steady" };
+    if (v >= 45) return { label: "建立中", cls: "building" };
+    return { label: "薄弱", cls: "weak" };
+  }
+
+  function learningModule(key, label, weight, mastery, samples, reliable, evidence, advice, href, extra) {
+    const value = mastery == null ? null : Math.max(0, Math.min(100, Number(mastery)));
+    const status = masteryStatus(value);
+    return {
+      key: key,
+      label: label,
+      weight: weight,
+      mastery: value,
+      samples: Math.max(0, Number(samples) || 0),
+      reliable: !!reliable,
+      evidence: evidence || "",
+      advice: advice || "",
+      href: href || "#/home",
+      assessed: value != null,
+      status: status.label,
+      cls: status.cls,
+      extra: extra || {}
+    };
+  }
+
+  function readingFocusInfo(rd) {
+    const focus = rd.focus;
+    const target = rd.target;
+    let kicker = "保持手感";
+    let title = "限时阅读一篇";
+    let copy = "题型正确率与依据定位都稳定。下一步限时做一篇，把速度压到 18 分钟内。";
     if (focus && focus.kind === "lucky") {
       kicker = "优先校准";
       title = "危险正确 " + focus.count + " 题";
@@ -2759,17 +2794,718 @@
       title = "依据定位 " + focus.rate + "%";
       copy = "答案正确率不错，但依据定位还不稳。回原文标题眼句，再选答案。";
     }
-    const href = target ? "#/reading/" + target.r.id + "/" + (target.qi + 1) : "#/reading";
-    const linkText = target
-      ? "回看 Reading " + String(target.r.id).padStart(2, "0") + " · 第 " + (target.qi + 1) + " 题 →"
-      : "再做一篇 →";
+    return {
+      kicker: kicker,
+      title: title,
+      copy: copy,
+      href: target ? "#/reading/" + target.r.id + "/" + (target.qi + 1) : "#/reading",
+      target: target
+    };
+  }
+
+  function learningDiagnosis() {
+    const modules = [];
+    const due = dueCount();
+    const doneExams = (state.exams || []).filter(function (r) { return r.self && r.self.done; });
+
+    /* 词汇：掌握度按“已掌握词 / 词库总量”计算，避免把“背过”误当成“掌握”。
+       复习准确率与到期量放在依据里，帮助判断是覆盖不足还是遗忘太多。 */
+    const vocabTracked = Object.keys(state.srs || {}).filter(function (w) { return WORD_MAP.has(w); }).length;
+    const vocabKnown = knownCount();
+    const vocabFuzzy = Object.keys(state.words || {}).filter(function (w) { return state.words[w] === "fuzzy"; }).length;
+    const vocabAssessed = vocabTracked > 0 || vocabKnown > 0 || vocabFuzzy > 0;
+    const vocabMastery = vocabAssessed ? vocabKnown / Math.max(1, ALL_WORDS.length) * 100 : null;
+    modules.push(learningModule(
+      "vocab", "词汇", 20, vocabMastery, vocabTracked, vocabTracked >= 10,
+      vocabAssessed
+        ? "已掌握 " + vocabKnown + " / " + ALL_WORDS.length + " · 待巩固 " + vocabFuzzy + " · 到期 " + due
+        : "还没有词汇标记",
+      due
+        ? "今天有 " + due + " 个词到期，先清复习再背新词。"
+        : "今天没有到期词，可以推进新词，并优先标记模糊词。",
+      "#/vocab",
+      { known: vocabKnown, fuzzy: vocabFuzzy, due: due }
+    ));
+
+    /* 阅读：正确率、依据定位、真会比例三项加权。没有依据数据时只看正确率，
+       并降低“真会”的权重，避免把蒙对算成掌握。 */
+    const rd = readingDiagnosis();
+    if (rd.answered) {
+      const accuracy = rd.correct / rd.answered;
+      const quality = rd.quality.trueMastery / rd.answered;
+      const locate = rd.locateRate == null ? null : rd.locateRate / 100;
+      const score = locate == null
+        ? accuracy * 0.75 + quality * 0.25
+        : accuracy * 0.55 + locate * 0.25 + quality * 0.20;
+      const focus = readingFocusInfo(rd);
+      modules.push(learningModule(
+        "reading", "阅读", 24, score * 100, rd.answered, rd.answered >= 5,
+        rd.submitted + " 篇 · " + rd.correct + "/" + rd.answered + " 题 · 依据 " + (rd.locateRate == null ? "未标" : rd.locateRate + "%") + (rd.answered < 5 ? " · 样本少" : ""),
+        focus.copy,
+        focus.href,
+        { focusKicker: focus.kicker, focusTitle: focus.title, focusCopy: focus.copy }
+      ));
+    } else {
+      modules.push(learningModule(
+        "reading", "阅读", 24, null, 0, false, "还没有提交阅读",
+        "先做一篇阅读，提交后建立题型与依据诊断。", "#/reading/1",
+        { focusKicker: "建立基线", focusTitle: "先做一篇阅读", focusCopy: "提交后这里会给出题型、用时与依据定位诊断。" }
+      ));
+    }
+
+    /* 完形：按已提交套数的总空数合并，避免只做一套就波动。 */
+    let clozeDone = 0;
+    let clozeRight = 0;
+    let clozeTotal = 0;
+    clozeSets().forEach(function (set, i) {
+      const st = state.clozes && state.clozes[i];
+      if (!st || !st.submitted) return;
+      const total = set.items.length;
+      clozeDone++;
+      clozeTotal += total;
+      clozeRight += Math.max(0, Math.min(total, Number(st.score) || 0));
+    });
+    const clozeMastery = clozeTotal ? clozeRight / clozeTotal * 100 : null;
+    modules.push(learningModule(
+      "cloze", "完形", 10, clozeMastery, clozeTotal, clozeDone >= 2,
+      clozeTotal ? clozeDone + " 套 · " + clozeRight + "/" + clozeTotal + " 空" : "还没有提交完形",
+      clozeMastery == null
+        ? "先做一套完形，提交后建立正确率基线。"
+        : (clozeMastery < 60
+          ? "错空多集中在搭配和逻辑关系。先回看错题空的前后句，再重做一套。"
+          : "正确率稳定，保持每套限时 15 分钟，重点看逻辑衔接。"),
+      "#/cloze/cloze",
+      { done: clozeDone }
+    ));
+
+    /* 新题型：七选五、排序、小标题合并统计，同时找出最弱一类。 */
+    const ntGroups = [
+      { key: "seven", label: "七选五", sets: sevenSets(), states: state.sevens, href: "#/cloze/seven" },
+      { key: "order", label: "排序", sets: orderSets(), states: state.orders, href: "#/cloze/order" },
+      { key: "heading", label: "小标题", sets: headingSets(), states: state.headings, href: "#/cloze/heading" }
+    ];
+    let ntDone = 0;
+    let ntRight = 0;
+    let ntTotal = 0;
+    const ntRates = [];
+    ntGroups.forEach(function (g) {
+      let gd = 0;
+      let gr = 0;
+      let gt = 0;
+      g.sets.forEach(function (set, i) {
+        const st = g.states && g.states[i];
+        if (!st || !st.submitted) return;
+        const total = set.answers.length;
+        gd++;
+        gt += total;
+        gr += Math.max(0, Math.min(total, Number(st.score) || 0));
+      });
+      if (gt) {
+        ntRates.push({ key: g.key, label: g.label, href: g.href, done: gd, right: gr, total: gt, rate: gr / gt });
+        ntDone += gd;
+        ntRight += gr;
+        ntTotal += gt;
+      }
+    });
+    ntRates.sort(function (a, b) { return a.rate - b.rate || b.total - a.total; });
+    const ntWeak = ntRates[0] || null;
+    const ntMastery = ntTotal ? ntRight / ntTotal * 100 : null;
+    modules.push(learningModule(
+      "newtype", "新题型", 10, ntMastery, ntTotal, ntDone >= 2,
+      ntTotal ? ntDone + " 套 · " + ntRight + "/" + ntTotal + " 题" + (ntWeak ? " · 最弱 " + ntWeak.label : "") : "还没有提交新题型",
+      ntMastery == null
+        ? "先做一套七选五，提交后建立新题型基线。"
+        : (ntWeak
+          ? ntWeak.label + "正确率 " + Math.round(ntWeak.rate * 100) + "%，先练这一类。"
+          : "新题型正确率稳定，保持每套限时 12 分钟。"),
+      ntWeak ? ntWeak.href : "#/cloze/seven",
+      { weakLabel: ntWeak ? ntWeak.label : "", weakRate: ntWeak ? ntWeak.rate : null }
+    ));
+
+    /* 翻译：只认采分点自评与模考翻译分，不用“写了多少字”冒充掌握度。 */
+    let transSamples = 0;
+    let transRatio = 0;
+    let transPoints = 0;
+    let transPointsRight = 0;
+    let transPractice = 0;
+    let transExam = 0;
+    Object.keys(state.transSelf || {}).forEach(function (key) {
+      const entry = transEntryByKey(key);
+      const points = (entry && entry.points) || [];
+      const checks = state.transSelf[key];
+      if (!points.length || !Array.isArray(checks)) return;
+      const right = checks.filter(Boolean).length;
+      if (!right) return;
+      transSamples++;
+      transPractice++;
+      transRatio += right / points.length;
+      transPoints += points.length;
+      transPointsRight += right;
+    });
+    doneExams.forEach(function (rec) {
+      const paper = mockPaper(rec.paperId);
+      if (!paper) return;
+      const max = Number(mockType(paper.type).translation) || 0;
+      if (!max) return;
+      const value = Math.max(0, Math.min(max, Number(rec.sections && rec.sections.translation) || 0));
+      transSamples++;
+      transExam++;
+      transRatio += value / max;
+    });
+    const transMastery = transSamples ? transRatio / transSamples * 100 : null;
+    const transHref = state.examType === "en1" ? "#/translation/sentence" : "#/translation/passage";
+    modules.push(learningModule(
+      "translation", "翻译", 12, transMastery, transSamples, transSamples >= 2,
+      transSamples
+        ? transSamples + " 次自评" + (transPractice ? " · 采分点 " + transPointsRight + "/" + transPoints : "") + (transExam ? " · 含模考 " + transExam + " 次" : "")
+        : "还没有翻译自评",
+      transMastery == null
+        ? "先译一段并勾选采分点，系统才能建立翻译诊断。"
+        : (transMastery < 60
+          ? "采分点覆盖不足。先自己译，再逐点核对，最后对照参考译文。"
+          : "采分点覆盖稳定，下一步压缩表达，避免逐词硬译。"),
+      transHref,
+      { practice: transPractice, exam: transExam, points: transPoints, pointsRight: transPointsRight }
+    ));
+
+    /* 写作：练习自评与模考写作分合并，未自评的草稿单独提示。 */
+    let writingSamples = 0;
+    let writingRatio = 0;
+    let writingPractice = 0;
+    let writingExam = 0;
+    Object.keys(state.draftSelf || {}).forEach(function (key) {
+      const src = state.draftSelf[key];
+      if (!src || typeof src !== "object") return;
+      const kind = key.indexOf("small-") === 0 ? "small" : "big";
+      const dims = draftSelfDims(kind);
+      const max = dims.reduce(function (s, d) { return s + d.max; }, 0);
+      const got = dims.reduce(function (s, d) {
+        return s + Math.max(0, Math.min(d.max, Number(src[d.key]) || 0));
+      }, 0);
+      if (!got) return;
+      writingSamples++;
+      writingPractice++;
+      writingRatio += got / max;
+    });
+    doneExams.forEach(function (rec) {
+      const paper = mockPaper(rec.paperId);
+      if (!paper) return;
+      const aMax = 10;
+      const bDims = writingBDims(paper);
+      const bMax = bDims.reduce(function (s, d) { return s + d.max; }, 0);
+      const a = Math.max(0, Math.min(aMax, Number(rec.sections && rec.sections.writingA) || 0));
+      const b = Math.max(0, Math.min(bMax, Number(rec.sections && rec.sections.writingB) || 0));
+      if (!a && !b) return;
+      writingSamples++;
+      writingExam++;
+      writingRatio += (a + b) / (aMax + bMax);
+    });
+    const draftCount = Object.keys(state.drafts || {}).length;
+    const writingUnscored = Math.max(0, draftCount - writingPractice);
+    const writingMastery = writingSamples ? writingRatio / writingSamples * 100 : null;
+    modules.push(learningModule(
+      "writing", "写作", 12, writingMastery, writingSamples, writingSamples >= 2,
+      writingSamples
+        ? writingSamples + " 次自评" + (writingPractice ? " · 练习 " + writingPractice + " 篇" : "") + (writingExam ? " · 含模考 " + writingExam + " 次" : "") + (writingUnscored ? " · " + writingUnscored + " 篇未自评" : "")
+        : (draftCount ? "有 " + draftCount + " 篇草稿，尚未自评" : "还没有写作自评"),
+      writingMastery == null
+        ? "先写一篇小作文并自评，系统才能建立写作诊断。"
+        : (writingMastery < 60
+          ? "先保结构与信息点，再改语言。写完后按维度自评，不要凭感觉给分。"
+          : "自评稳定，下一步换题重写，重点压缩模板句。"),
+      "#/writing/small",
+      { unscored: writingUnscored }
+    ));
+
+    /* 模考：只统计已完成自评的场次；未自评的客观题分不当作总分。 */
+    const mockAvg = doneExams.length
+      ? doneExams.reduce(function (s, r) { return s + (Number(r.total) || 0); }, 0) / doneExams.length
+      : null;
+    const lastExam = doneExams.length
+      ? doneExams.reduce(function (m, r) { return Math.max(m, Number(r.submittedAt) || 0); }, 0)
+      : 0;
+    const daysSinceExam = lastExam ? Math.max(0, Math.floor((Date.now() - lastExam) / 86400000)) : null;
+    modules.push(learningModule(
+      "mock", "模考", 12, mockAvg, doneExams.length, doneExams.length >= 1,
+      doneExams.length
+        ? doneExams.length + " 次 · 平均 " + examScoreText(mockAvg) + " / 100" + (daysSinceExam != null ? " · 最近 " + daysSinceExam + " 天前" : "")
+        : "还没有完成自评的模考",
+      mockAvg == null
+        ? "先完整走一遍 180 分钟模考，再按维度自评。"
+        : (mockAvg < 60
+          ? "总分还没过线。先看分模块得分，优先补阅读与新题型。"
+          : "总分已过线，下一步按分模块找短板，保持每周一次限时。"),
+      "#/exam",
+      { lastAt: lastExam, daysSince: daysSinceExam, avg: mockAvg }
+    ));
+
+    const assessed = modules.filter(function (m) { return m.assessed; });
+    const missing = modules.filter(function (m) { return !m.assessed; });
+    const assessedWeight = assessed.reduce(function (s, m) { return s + m.weight; }, 0);
+    const overall = assessedWeight
+      ? assessed.reduce(function (s, m) { return s + m.mastery * m.weight; }, 0) / assessedWeight
+      : null;
+    const coverage = assessedWeight;
+    const weakest = assessed.slice().sort(function (a, b) {
+      return a.mastery - b.mastery || b.weight - a.weight;
+    })[0] || null;
+    const weak = assessed.filter(function (m) { return m.mastery < 70; }).sort(function (a, b) {
+      return a.mastery - b.mastery || b.weight - a.weight;
+    });
+    const readingModule = modules.find(function (m) { return m.key === "reading"; });
+
+    let narrative = "";
+    if (!assessed.length) {
+      narrative = "还没有足够记录。先做一篇阅读、背一组词、译一段，诊断会自动建立。";
+    } else {
+      const low = weak[0] || null;
+      const bits = [];
+      bits.push(low
+        ? low.label + " " + masteryNum(low.mastery) + " 分，是当前最需要补的模块。"
+        : "已评估模块整体稳定，下一步保持限时与复盘。");
+      if (readingModule && readingModule.assessed && readingModule.extra.focusCopy) {
+        bits.push(readingModule.extra.focusCopy);
+      } else if (missing.length) {
+        bits.push("还有 " + missing.length + " 个模块没有样本：" + missing.map(function (m) { return m.label; }).join("、") + "。");
+      }
+      if (due) bits.push("今天 " + due + " 个词到期，先清复习账。");
+      narrative = bits.slice(0, 2).join("");
+    }
+
+    return {
+      modules: modules,
+      assessed: assessed,
+      missing: missing,
+      overall: overall,
+      overallLabel: overall == null ? "样本不足" : (coverage < 40 ? "样本不足" : masteryStatus(overall).label),
+      coverage: coverage,
+      weakest: weakest,
+      weak: weak,
+      narrative: narrative
+    };
+  }
+
+  function reviewForecast(days) {
+    const n = Math.max(1, Math.min(14, Number(days) || 7));
+    const today = todayKey();
+    const out = [];
+    const names = "日一二三四五六";
+    for (let i = 0; i < n; i++) {
+      const date = addDays(new Date(), i);
+      const key = ymd(date);
+      const count = ALL_WORDS.filter(function (w) {
+        const e = srsOf(w.w);
+        if (!e || !e.due) return false;
+        if (i === 0) return e.due <= today;
+        return e.due === key;
+      }).length;
+      out.push({
+        key: key,
+        label: i === 0 ? "今天" : (i === 1 ? "明天" : "周" + names[date.getDay()]),
+        count: count
+      });
+    }
+    return out;
+  }
+
+  function reviewForecastLine() {
+    if (!Object.keys(state.srs || {}).length) return "";
+    const rows = reviewForecast(7);
+    const total = rows.reduce(function (s, r) { return s + r.count; }, 0);
+    return `<p class="review-forecast-line"><b>未来 7 天</b> ${rows.map(function (r) {
+      return r.label + " " + r.count;
+    }).join(" · ")}<span>共 ${total} 词</span></p>`;
+  }
+
+  function reviewForecastBars() {
+    const rows = reviewForecast(7);
+    const total = rows.reduce(function (s, r) { return s + r.count; }, 0);
+    const max = Math.max(1, Math.max.apply(null, rows.map(function (r) { return r.count; })));
     return `
-      <section class="rail-block rail-next">
-        <div class="rail-head"><h3>下一步</h3><span>阅读诊断</span></div>
-        <p class="next-kicker">${kicker}</p>
-        <p class="next-title">${esc(title)}</p>
-        <p class="next-copy">${esc(copy)}</p>
-        <a class="text-link" href="${href}">${linkText}</a>
+      <div class="forecast">
+        <div class="forecast-head"><span>未来 7 天复习</span><span>${total} 词</span></div>
+        <div class="forecast-bars">
+          ${rows.map(function (r, i) {
+            const h = r.count ? Math.max(6, Math.round(r.count / max * 100)) : 0;
+            return `<div class="forecast-col ${i === 0 ? "today" : ""} ${r.count ? "has" : ""}" title="${r.key} · ${r.count} 词">
+              <span class="forecast-count">${r.count || ""}</span>
+              <span class="forecast-bar"><i style="height:${h}%"></i></span>
+              <span class="forecast-label">${r.label}</span>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>`;
+  }
+
+  function focusTaskHtml(task, variant) {
+    const cls = "focus-item" + (variant === "wide" ? " wide" : "");
+    const inner = `
+      <span class="focus-kicker">${esc(task.kicker)}</span>
+      <span class="focus-title">${esc(task.title)}</span>
+      <span class="focus-copy">${esc(task.copy)}</span>
+      <span class="focus-foot"><span>${esc(task.meta || "")}</span><span class="focus-arrow">→</span></span>`;
+    if (task.action) {
+      return `<button class="${cls}" data-action="${esc(task.action)}">${inner}</button>`;
+    }
+    return `<a class="${cls}" href="${esc(task.href)}">${inner}</a>`;
+  }
+
+  function adaptiveTasks(diag) {
+    const d = diag || learningDiagnosis();
+    const map = {};
+    d.modules.forEach(function (m) { map[m.key] = m; });
+    const due = dueCount();
+    const doneExams = (state.exams || []).filter(function (r) { return r.self && r.self.done; });
+    const lastExam = doneExams.length
+      ? doneExams.reduce(function (m, r) { return Math.max(m, Number(r.submittedAt) || 0); }, 0)
+      : 0;
+    const daysSinceExam = lastExam ? Math.max(0, Math.floor((Date.now() - lastExam) / 86400000)) : null;
+    const daysLeft = Math.max(0, daysUntil(state.examDate));
+    const candidates = [];
+    const push = function (module, priority, task) {
+      candidates.push(Object.assign({ module: module, priority: priority }, task));
+    };
+
+    if (due > 0) {
+      push("vocab", 120 + Math.min(30, due), {
+        kicker: "复习到期",
+        title: "清掉 " + due + " 个到期词",
+        copy: "间隔复习已到期。先清旧账，再背新词；模糊词会回到明天。",
+        href: "#/vocab",
+        action: "start-review",
+        meta: "约 " + Math.max(5, Math.min(25, Math.ceil(due / 4))) + " 分钟"
+      });
+    } else if (map.vocab && map.vocab.assessed) {
+      push("vocab", 30, {
+        kicker: "推进词库",
+        title: "再推进 20 个新词",
+        copy: "今天没有到期词。推进新词，顺手把模糊词标出来。",
+        href: "#/vocab",
+        meta: "约 15 分钟"
+      });
+    } else {
+      push("vocab", 88, {
+        kicker: "建立基线",
+        title: "先背 20 个高频词",
+        copy: "先建立词汇样本。认识、模糊、不认识都要如实标记。",
+        href: "#/vocab",
+        meta: "约 15 分钟"
+      });
+    }
+
+    const rm = map.reading;
+    if (!rm || !rm.assessed) {
+      push("reading", 92, {
+        kicker: "建立基线",
+        title: "先做一篇阅读",
+        copy: "提交后会自动诊断题型、用时和依据定位。",
+        href: "#/reading/1",
+        meta: "18 分钟"
+      });
+    } else if (!rm.reliable) {
+      push("reading", 72, {
+        kicker: "补样本",
+        title: "再做一篇阅读",
+        copy: "当前只有 " + rm.samples + " 题样本，再做一篇才能判断稳定弱项。",
+        href: "#/reading",
+        meta: "18 分钟"
+      });
+    } else if (rm.mastery < 70) {
+      push("reading", 65 + (70 - rm.mastery) * 0.6, {
+        kicker: rm.extra.focusKicker || "优先补",
+        title: rm.extra.focusTitle || ("阅读 " + masteryNum(rm.mastery) + " 分"),
+        copy: rm.extra.focusCopy || rm.advice,
+        href: rm.href,
+        meta: "约 18 分钟"
+      });
+    } else {
+      push("reading", 34, {
+        kicker: "保持手感",
+        title: "限时阅读一篇",
+        copy: "正确率与依据定位稳定，保持 18 分钟限时。",
+        href: "#/reading",
+        meta: "18 分钟"
+      });
+    }
+
+    const cm = map.cloze;
+    if (!cm || !cm.assessed) {
+      push("cloze", 55, {
+        kicker: "建立基线",
+        title: "做一套完形填空",
+        copy: "先通读定调，再逐空找搭配与逻辑。",
+        href: "#/cloze/cloze",
+        meta: "15 分钟"
+      });
+    } else if (!cm.reliable) {
+      push("cloze", 54, {
+        kicker: "补样本",
+        title: "再做一套完形",
+        copy: "已做完 " + cm.samples + " 空，再做一套看稳定性。",
+        href: "#/cloze/cloze",
+        meta: "15 分钟"
+      });
+    } else if (cm.mastery < 70) {
+      push("cloze", 58 + (70 - cm.mastery) * 0.35, {
+        kicker: "优先补",
+        title: "完形 · 正确率 " + masteryNum(cm.mastery) + "%",
+        copy: cm.advice,
+        href: "#/cloze/cloze",
+        meta: "15 分钟"
+      });
+    } else {
+      push("cloze", 22, {
+        kicker: "保持",
+        title: "完形保持一套",
+        copy: "正确率稳定，重点看逻辑衔接与固定搭配。",
+        href: "#/cloze/cloze",
+        meta: "15 分钟"
+      });
+    }
+
+    const nm = map.newtype;
+    if (!nm || !nm.assessed) {
+      push("newtype", 53, {
+        kicker: "建立基线",
+        title: "做一套七选五",
+        copy: "先看选项里的代词和连接词，再回空白前后找线索。",
+        href: "#/cloze/seven",
+        meta: "12 分钟"
+      });
+    } else if (!nm.reliable) {
+      push("newtype", 52, {
+        kicker: "补样本",
+        title: "再做一套新题型",
+        copy: "已做完 " + nm.samples + " 题，再做一套看稳定性。",
+        href: nm.href,
+        meta: "12 分钟"
+      });
+    } else if (nm.mastery < 70) {
+      push("newtype", 57 + (70 - nm.mastery) * 0.35, {
+        kicker: "优先补",
+        title: "新题型 · " + (nm.extra.weakLabel || "正确率 " + masteryNum(nm.mastery) + "%"),
+        copy: nm.advice,
+        href: nm.href,
+        meta: "12 分钟"
+      });
+    } else {
+      push("newtype", 20, {
+        kicker: "保持",
+        title: "新题型保持一套",
+        copy: "三类新题型轮换做，别只练顺手的那一类。",
+        href: nm.href,
+        meta: "12 分钟"
+      });
+    }
+
+    const tm = map.translation;
+    if (!tm || !tm.assessed) {
+      push("translation", 68, {
+        kicker: "建立基线",
+        title: "译一段并勾采分点",
+        copy: "翻译诊断来自采分点自评，不来自字数。",
+        href: tm ? tm.href : "#/translation",
+        meta: "15 分钟"
+      });
+    } else if (!tm.reliable) {
+      push("translation", 60, {
+        kicker: "补样本",
+        title: "再译一段",
+        copy: "已有 1 次自评，再做一段才能看稳定性。",
+        href: tm.href,
+        meta: "15 分钟"
+      });
+    } else if (tm.mastery < 70) {
+      push("translation", 62 + (70 - tm.mastery) * 0.35, {
+        kicker: "优先补",
+        title: "翻译 · 采分点 " + masteryNum(tm.mastery) + "%",
+        copy: tm.advice,
+        href: tm.href,
+        meta: "15 分钟"
+      });
+    } else {
+      push("translation", 24, {
+        kicker: "保持",
+        title: "翻译保持一段",
+        copy: "先读懂，再说人话。译完对照参考译文，只改三处。",
+        href: tm.href,
+        meta: "15 分钟"
+      });
+    }
+
+    const wm = map.writing;
+    if (!wm || !wm.assessed) {
+      push("writing", 66, {
+        kicker: "建立基线",
+        title: "写一篇小作文并自评",
+        copy: "先保格式与信息点，再按维度给分。",
+        href: "#/writing/small",
+        meta: "20 分钟"
+      });
+    } else if (!wm.reliable) {
+      push("writing", 58, {
+        kicker: "补样本",
+        title: "再写一篇并自评",
+        copy: "已有 1 次自评，再写一篇才能看稳定性。",
+        href: "#/writing/big",
+        meta: "25 分钟"
+      });
+    } else if (wm.mastery < 70) {
+      push("writing", 60 + (70 - wm.mastery) * 0.35, {
+        kicker: "优先补",
+        title: "写作 · 自评 " + masteryNum(wm.mastery) + " 分",
+        copy: wm.advice,
+        href: "#/writing/big",
+        meta: "25 分钟"
+      });
+    } else {
+      push("writing", 23, {
+        kicker: "保持",
+        title: "换题写一段",
+        copy: "不整篇背范文。换主题，改结构，写出自己的版本。",
+        href: "#/writing/big",
+        meta: "20 分钟"
+      });
+    }
+
+    if (!doneExams.length) {
+      const baselineReady = d.assessed.length >= 4;
+      push("mock", baselineReady ? (daysLeft <= 60 ? 96 : 48) : 38, {
+        kicker: "全真演练",
+        title: "完成一次 180 分钟模考",
+        copy: baselineReady
+          ? "先走完整流程，再按维度自评。客观题与主观题分开看。"
+          : "先建立阅读、词汇、翻译或写作基线，再做整卷更能看出问题。",
+        href: "#/exam",
+        meta: "180 分钟"
+      });
+    } else if (daysSinceExam != null && daysSinceExam >= 14) {
+      push("mock", daysLeft <= 60 ? 94 : 42, {
+        kicker: "限时演练",
+        title: "距离上次模考 " + daysSinceExam + " 天",
+        copy: "重新按 180 分钟走一遍，重点看分模块得分有没有变化。",
+        href: "#/exam",
+        meta: "180 分钟"
+      });
+    } else {
+      push("mock", 18, {
+        kicker: "保持",
+        title: "回看模考分模块得分",
+        copy: "不重做整卷，只看最弱模块和错题归因。",
+        href: "#/exam",
+        meta: "10 分钟"
+      });
+    }
+
+    if (state.mistakes.length) {
+      push("review", 40 + Math.min(20, state.mistakes.length), {
+        kicker: "错题复盘",
+        title: "复盘 " + Math.min(5, state.mistakes.length) + " 道错题",
+        copy: "先遮答案重做，再回看解析。移出错题本前，要能说清为什么错。",
+        href: "#/me/mistakes",
+        meta: "10 分钟"
+      });
+    }
+
+    push("sentence", 16, {
+      kicker: "每日基本功",
+      title: "拆两句长难句",
+      copy: "先找主干，再把从句、分词和插入语挂回去。",
+      href: "#/sentences",
+      meta: "12 分钟"
+    });
+    if (state.notebook.length) {
+      push("notebook", 14, {
+        kicker: "生词回看",
+        title: "回看生词本 " + state.notebook.length + " 词",
+        copy: "只看还不认识的词，能说出核心义项就移出。",
+        href: "#/me/notebook",
+        meta: "8 分钟"
+      });
+    }
+    push("plan", 8, {
+      kicker: "阶段校准",
+      title: "核对当前阶段规划",
+      copy: "规划不是排满每天，而是知道这一阶段该解决什么。",
+      href: "#/plan",
+      meta: "5 分钟"
+    });
+
+    candidates.sort(function (a, b) {
+      return b.priority - a.priority || String(a.module).localeCompare(String(b.module));
+    });
+    const selected = [];
+    const used = {};
+    candidates.forEach(function (task) {
+      if (selected.length >= 3 || used[task.module]) return;
+      used[task.module] = true;
+      selected.push(task);
+    });
+    return selected;
+  }
+
+  function homeFocusPanel() {
+    const d = learningDiagnosis();
+    const tasks = adaptiveTasks(d).slice(0, 3);
+    return `
+      <section class="rail-block rail-focus">
+        <div class="rail-head"><h3>今日重点</h3><span>${d.overall == null ? "先建立诊断" : "掌握度 " + masteryNum(d.overall)}</span></div>
+        <div class="focus-list">${tasks.map(function (t) { return focusTaskHtml(t, "rail"); }).join("")}</div>
+        <a class="text-link" href="#/me/summary">看完整诊断 →</a>
+      </section>`;
+  }
+
+  function adaptiveSection() {
+    const d = learningDiagnosis();
+    const tasks = adaptiveTasks(d).slice(0, 3);
+    return `
+      <section class="section focus-section">
+        <div class="section-head"><h2>当前优先</h2><span class="section-note">${d.overall == null ? "先建立诊断" : "掌握度 " + masteryNum(d.overall) + " / 100"} · 随作答更新</span></div>
+        <div class="focus-grid">${tasks.map(function (t) { return focusTaskHtml(t, "wide"); }).join("")}</div>
+        <p class="mini-note">建议由最近作答、到期复习和自评记录实时生成，只决定先后，不替代阶段规划。</p>
+      </section>`;
+  }
+
+  function learningDiagnosisPanel() {
+    const d = learningDiagnosis();
+    const tasks = adaptiveTasks(d).slice(0, 3);
+    const rows = d.modules.map(function (m) {
+      const value = m.assessed ? masteryNum(m.mastery) + "<small>/100</small>" : "待建立";
+      const width = m.assessed ? Math.max(2, Math.round(m.mastery)) : 0;
+      return `
+        <div class="mastery-row ${m.cls}">
+          <div class="mastery-label"><b>${esc(m.label)}</b><span>权重 ${m.weight}%${m.reliable ? "" : " · 样本少"}</span></div>
+          <div class="mastery-bar"><i style="width:${width}%"></i></div>
+          <div class="mastery-value">${value}</div>
+          <div class="mastery-evidence">${esc(m.evidence)}</div>
+        </div>`;
+    }).join("");
+    return `
+      <section class="learning-diag">
+        <div class="learning-diag-head">
+          <div class="learning-diag-copy">
+            <p class="eyebrow">学习诊断</p>
+            <h2>当前掌握度 <b>${d.overall == null ? "—" : masteryNum(d.overall)}</b><small>/100</small></h2>
+            <p>${esc(d.narrative)}</p>
+          </div>
+          <div class="learning-diag-figures">
+            <div><span>已评估</span><b>${d.assessed.length}<small>/7</small></b><em>模块</em></div>
+            <div><span>证据覆盖</span><b>${Math.round(d.coverage)}<small>%</small></b><em>按权重</em></div>
+            <div><span>最弱</span><b class="diag-weak">${d.weakest ? esc(d.weakest.label) : "—"}</b><em>${d.weakest ? masteryNum(d.weakest.mastery) + " 分" : "先做题"}</em></div>
+          </div>
+        </div>
+        <div class="learning-diag-grid">
+          <div class="mastery-list">
+            <div class="mastery-head"><span>模块</span><span>掌握度</span><span>依据</span></div>
+            ${rows}
+          </div>
+          <aside class="diag-side">
+            <div class="diag-side-head"><span>接下来</span><span>${tasks.length} 件</span></div>
+            <div class="focus-list compact">${tasks.map(function (t) { return focusTaskHtml(t, "rail"); }).join("")}</div>
+            ${reviewForecastBars()}
+          </aside>
+        </div>
+        <p class="learning-diag-note">掌握度由已提交练习、采分点自评和模考成绩折算，只统计有证据的模块；不是分数预测。样本少的模块会标注。</p>
       </section>`;
   }
 
@@ -3112,7 +3848,10 @@
   }
 
   function pageCloze() {
-    const tab = ["cloze", "seven", "order", "heading"].indexOf(ui.clozeTab) !== -1 ? ui.clozeTab : "cloze";
+    const route = getRoute();
+    const routeTab = route.name === "cloze" && ["cloze", "seven", "order", "heading"].indexOf(route.param) !== -1 ? route.param : null;
+    const tab = routeTab || (["cloze", "seven", "order", "heading"].indexOf(ui.clozeTab) !== -1 ? ui.clozeTab : "cloze");
+    ui.clozeTab = tab;
     const meta = {
       cloze: ["完形填空", "完形考的不是单词量，而是上下文关系。先通读定调，再逐空找搭配与逻辑。"],
       seven: ["新题型 · 七选五", "七选五考篇章衔接。先看选项里的代词和连接词，再回到空白前后找线索。"],
@@ -3439,6 +4178,10 @@
   }
 
   function pageTranslation() {
+    const route = getRoute();
+    if (route.name === "translation" && (route.param === "sentence" || route.param === "passage")) {
+      ui.transTab = route.param;
+    }
     const isSentence = ui.transTab === "sentence";
     const methods = window.TRANSLATIONS.methods.map(function (m) {
       return `<div class="method"><h3>${esc(m[0])}</h3><p>${esc(m[1])}</p></div>`;
@@ -3593,6 +4336,10 @@
   ------------------------------------------------------------------ */
 
   function pageWriting() {
+    const route = getRoute();
+    if (route.name === "writing" && ["small", "big", "patterns"].indexOf(route.param) !== -1) {
+      ui.writingTab = route.param;
+    }
     return `
       ${pageHead("07", "写作", "写作", "范文不是拿来整篇背的。拆结构、换主题、改句子，最后要能写出自己的版本。")}
       <div class="writing-intro">
@@ -5996,6 +6743,8 @@
         <div class="head-actions"><button class="btn btn-sm btn-quiet" data-action="print">打印这份规划</button></div>
       </div>
 
+      ${adaptiveSection()}
+
       <section class="section">
         <div class="section-head"><h2>考试结构</h2><span class="section-note">英语一 / 英语二</span></div>
         <div class="table-wrap"><table class="data plan-table struct"><thead><tr><th>部分</th><th>题量</th><th>英语一</th><th>英语二</th><th>建议用时</th><th>备注</th></tr></thead><tbody>${structure}</tbody></table></div>
@@ -6349,6 +7098,8 @@
     const smooth = function (n, d) { return d ? (Math.round(n / d * 10) / 10) : 0; };
 
     return `
+      ${learningDiagnosisPanel()}
+
       <section class="me-summary-block">
         <div class="section-head"><h2>打卡与节奏</h2><span class="section-note">今天 ${todayTasks} / 5 项任务 · 最近 7 天</span></div>
         <div class="sum-cards">
@@ -6837,7 +7588,8 @@
         ui.spell = null;
         ui.listen = null;
         ui.dictation = null;
-        rerender();
+        if (getRoute().name !== "vocab") location.hash = "#/vocab";
+        else rerender();
         break;
       }
       case "set-mode": {
@@ -7205,10 +7957,14 @@
         ui.trapAnswers = [];
         render();
         break;
-      case "cloze-tab":
+      case "cloze-tab": {
+        if (["cloze", "seven", "order", "heading"].indexOf(data.tab) === -1) break;
         ui.clozeTab = data.tab;
-        render();
+        const target = "#/cloze/" + data.tab;
+        if (location.hash !== target) location.hash = target;
+        else render();
         break;
+      }
       case "cloze-set":
         ui.clozeSet = Math.max(0, Number(data.i) || 0);
         render();
@@ -7438,10 +8194,14 @@
         toast("已重置本篇小标题");
         break;
       }
-      case "trans-tab":
+      case "trans-tab": {
+        if (data.tab !== "sentence" && data.tab !== "passage") break;
         ui.transTab = data.tab;
-        render();
+        const target = "#/translation/" + data.tab;
+        if (location.hash !== target) location.hash = target;
+        else render();
         break;
+      }
       case "trans-point": {
         const key = data.key;
         const entry = transEntryByKey(key);
@@ -7532,10 +8292,14 @@
         if (entry) copyThen(entry.ref, "参考译文已复制");
         break;
       }
-      case "writing-tab":
+      case "writing-tab": {
+        if (["small", "big", "patterns"].indexOf(data.tab) === -1) break;
         ui.writingTab = data.tab;
-        render();
+        const target = "#/writing/" + data.tab;
+        if (location.hash !== target) location.hash = target;
+        else render();
         break;
+      }
       case "jump-pattern": {
         const el = document.getElementById("pattern-g-" + data.i);
         if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -7726,6 +8490,18 @@
       const el = e.target.closest("[data-action]");
       if (!el || el.disabled) return;
       handleAction(el.getAttribute("data-action"), el);
+    });
+
+    // 手机底部“更多”菜单：点链接后收起，点空白处也收起。
+    document.addEventListener("click", function (e) {
+      const link = e.target.closest(".mobile-more-menu a");
+      if (link) {
+        const box = link.closest("details");
+        if (box) box.open = false;
+        return;
+      }
+      const open = document.querySelector(".mobile-more[open]");
+      if (open && !open.contains(e.target)) open.open = false;
     });
 
     // 任何第一次触摸都尝试给在线神经网络音暖场（函数内部自会去重）
@@ -7992,7 +8768,7 @@
       || location.hostname === "127.0.0.1";
     if (!secure) return;
     window.addEventListener("load", function () {
-      navigator.serviceWorker.register("sw.js").catch(function () { /* 离线增强失败不影响主功能 */ });
+      navigator.serviceWorker.register("sw.js?v=" + encodeURIComponent(APP_BUILD)).catch(function () { /* 离线增强失败不影响主功能 */ });
     });
   }
 
