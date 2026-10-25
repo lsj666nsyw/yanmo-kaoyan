@@ -1,6 +1,9 @@
 (function () {
   "use strict";
 
+  // 显示在页脚与语音自检里，方便确认手机上跑的是不是最新版本
+  const APP_BUILD = "2026-10-25.1";
+
   /* ------------------------------------------------------------------
      data
   ------------------------------------------------------------------ */
@@ -180,6 +183,7 @@
   let builtinTtsReady = false;
   let builtinTtsFailed = false;
   let ttsDiagActive = false;
+  let lastTtsDiag = "";
 
   // 平台判定：手机/平板的朗读链路与桌面不同，单独做稳定性处理。
   const IS_TOUCH = (typeof window !== "undefined") && (("ontouchstart" in window) || (navigator.maxTouchPoints || 0) > 0);
@@ -273,21 +277,27 @@
     return alive[0];
   }
 
-  // 朗读候选链：首选（手动指定或自动最优）→ 其他本地系统语音；在线音失败后不再连试在线音
+  // 朗读候选链：首选（手动指定或自动最优）→ 其他自然系统语音。
+  // 只要设备有自然音，就不把机械本地音放进候选链，免得读到一半突然变机器音；
+  // 自然音全失败后由上层接着走在线人声。
   function voiceCandidates() {
     const alive = englishVoices().filter(function (v) { return !deadVoices.has(v.name); });
-    const out = [];
     const pref = (state && state.ttsVoice) || "";
+    let pool = alive;
+    if (!pref) {
+      const naturalAlive = alive.filter(function (v) { return NATURAL_VOICE_RE.test(v.name || ""); });
+      if (naturalAlive.length) pool = naturalAlive;
+    }
+    const out = [];
     if (pref) {
       for (let i = 0; i < alive.length; i++) {
         if (alive[i].name === pref || alive[i].voiceURI === pref) { out.push(alive[i]); break; }
       }
-    } else if (alive.length) {
-      out.push(alive[0]);
+    } else if (pool.length) {
+      out.push(pool[0]);
     }
-    // 手动指定或自动最优 → 本地系统语音兜着 → 在线声再补两个（全都在线的设备避免单点失败直落机械音）
-    const rest = alive.filter(function (v) { return out.indexOf(v) === -1; });
-    for (let i = 0; i < rest.length && out.length < 3; i++) out.push(rest[i]);
+    const rest = pool.filter(function (v) { return out.indexOf(v) === -1; });
+    for (let i = 0; i < rest.length && out.length < 4; i++) out.push(rest[i]);
     return out;
   }
 
@@ -306,12 +316,58 @@
   ------------------------------------------------------------------ */
   const NATURAL_VOICE_RE = /natural|neural|online|enhanced|premium|siri|samantha|daniel|moira|karen|tessa|serena/i;
   let onlineAudio = null;
+  let onlineAudioUnlocked = false;
   let onlineToken = 0;
   let onlineActive = false;
   let onlineFailedText = "";
+  // 极短的静音 WAV：首次触摸时用它把音频元素解锁，之后整段朗读都复用这个元素
+  const SILENT_WAV = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+
+  function onlineAudioEl() {
+    if (onlineAudio) return onlineAudio;
+    try {
+      const a = new Audio();
+      a.preload = "auto";
+      a.setAttribute("playsinline", "");
+      onlineAudio = a;
+    } catch (err) { onlineAudio = null; }
+    return onlineAudio;
+  }
+
+  /* 手机浏览器只允许“被用户手势解锁过”的音频元素继续播放。
+     整段朗读必须复用同一个元素；每段新建 Audio 时，第二段起会被拦截，
+     表现就是“第一段人声、后面全变机械音”。 */
+  function unlockOnlineAudio() {
+    if (!IS_MOBILE || onlineAudioUnlocked) return;
+    const a = onlineAudioEl();
+    if (!a) return;
+    try {
+      a.pause();
+      a.onended = null;
+      a.onerror = null;
+      a.onplaying = null;
+      a.src = SILENT_WAV;
+      onlineAudioUnlocked = true;
+      const p = a.play();
+      if (p && p.catch) p.catch(function () { try { a.pause(); } catch (err) {} });
+    } catch (err) { onlineAudioUnlocked = false; }
+  }
+
+  function clearOnlineAudio() {
+    const a = onlineAudio;
+    if (!a) return;
+    try {
+      a.onended = null;
+      a.onerror = null;
+      a.onplaying = null;
+      a.pause();
+    } catch (err) {}
+  }
 
   function hasNaturalVoice() {
-    return englishVoices().some(function (v) { return NATURAL_VOICE_RE.test(v.name || ""); });
+    return englishVoices().some(function (v) {
+      return !deadVoices.has(v.name) && NATURAL_VOICE_RE.test(v.name || "");
+    });
   }
 
   // 只把「单词/短词组」交给词典音源；整句、长短语不走（词典接口不支持）
@@ -326,21 +382,27 @@
   function speakOnline(text, onFail) {
     if (!isWordLike(text)) return false;
     if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
-    let a = null;
-    try { a = new Audio(); } catch (err) { return false; }
+    const a = onlineAudioEl();
+    if (!a) return false;
     const token = ++onlineToken;
     const rate = state && state.ttsRate === "slow" ? 0.8 : (state && state.ttsRate === "fast" ? 1.15 : 1);
     let settled = false;
+    let guard = null;
     const finish = function (ok) {
       if (settled) return;
       settled = true;
-      clearTimeout(guard);
+      if (guard) { clearTimeout(guard); guard = null; }
       if (token !== onlineToken) return;
+      try {
+        a.onended = null;
+        a.onerror = null;
+        a.onplaying = null;
+      } catch (err) {}
       onlineActive = false;
       ttsMarkSpeaking(false);
       if (!ok) { onlineFailedText = text; onFail(); }
     };
-    const guard = setTimeout(function () {
+    guard = setTimeout(function () {
       if (token !== onlineToken) return;
       if (a.currentTime > 0 && !a.paused) return;   // 已经在放，不打扰
       try { a.pause(); } catch (err) {}
@@ -348,16 +410,19 @@
     }, IS_MOBILE ? 2800 : 4200);
     try {
       a.pause();
+      a.onended = null;
+      a.onerror = null;
+      a.onplaying = null;
       a.preload = "auto";
+      a.referrerPolicy = "no-referrer";
       a.src = "https://dict.youdao.com/dictvoice?audio=" + encodeURIComponent(text) + "&type=2";
       a.playbackRate = rate;
+      a.onended = function () { finish(true); };
+      a.onerror = function () { finish(false); };
       ttsMarkSpeaking(true);
       onlineActive = true;
       const p = a.play();
       if (p && p.catch) p.catch(function () { if (token === onlineToken) finish(false); });
-      a.onended = function () { finish(true); };
-      a.onerror = function () { finish(false); };
-      onlineAudio = a;
       return true;
     } catch (err) {
       onlineActive = false;
@@ -418,16 +483,25 @@
     onlineTextDead = false;
     const chunks = onlineSplit(text, 160);
     if (!chunks.length) return false;
+    const a = onlineAudioEl();
+    if (!a) return false;
     const token = ++onlineToken;
     const rate = state && state.ttsRate === "slow" ? 0.82 : (state && state.ttsRate === "fast" ? 1.16 : 1);
     let idx = 0;
     let settled = false;
     let guard = null;
-    let prefetched = null;
+
+    function clearHandlers() {
+      try {
+        a.onended = null;
+        a.onerror = null;
+        a.onplaying = null;
+      } catch (err) {}
+    }
 
     function cleanUp() {
       if (guard) { clearTimeout(guard); guard = null; }
-      if (prefetched) { try { prefetched.src = ""; } catch (err) {} prefetched = null; }
+      clearHandlers();
     }
 
     function fail(blocked) {
@@ -436,7 +510,7 @@
       cleanUp();
       if (token !== onlineToken) return;
       onlineActive = false;
-      try { if (onlineAudio) onlineAudio.pause(); } catch (err) {}
+      try { a.pause(); } catch (err) {}
       ttsMarkSpeaking(false);
       if (idx === 0 && !blocked) {
         onlineTextDead = true;
@@ -446,7 +520,7 @@
           toast("在线人声暂时连不上，先用系统语音；稍后会自动重试");
         }
       }
-      // 中途失败时只把剩下的部分交给系统语音，避免从头再读一遍
+      // 中途失败时只把剩下的部分交给下一层，避免从头再读一遍
       const rest = idx === 0 ? "" : chunks.slice(idx).join(" ");
       try { onFail(rest); } catch (err) {}
     }
@@ -460,56 +534,44 @@
       ttsMarkSpeaking(false);
     }
 
-    function prefetchNext() {
-      if (idx + 1 >= chunks.length) return;
-      try {
-        const pf = new Audio();
-        pf.referrerPolicy = "no-referrer";
-        pf.preload = "auto";
-        pf.src = baiduTtsUrl(chunks[idx + 1]);
-        prefetched = pf;
-      } catch (err) {}
-    }
-
     function playChunk() {
       if (settled) return;
       if (token !== onlineToken) { done(); return; }
       if (idx >= chunks.length) { done(); return; }
-      let a;
-      try { a = new Audio(); } catch (err) { fail(); return; }
-      a.referrerPolicy = "no-referrer";
-      a.preload = "auto";
-      a.playbackRate = rate;
-      a.onplaying = function () {
-        if (guard) { clearTimeout(guard); guard = null; }
-      };
-      a.onended = function () {
-        if (settled || token !== onlineToken) return;
-        if (guard) { clearTimeout(guard); guard = null; }
-        idx++;
-        playChunk();
-      };
-      a.onerror = function () { fail(); };
+      const myIdx = idx;
       try {
-        onlineAudio = a;
+        a.pause();
+        clearHandlers();
+        a.preload = "auto";
+        a.referrerPolicy = "no-referrer";
+        a.playbackRate = rate;
+        a.onplaying = function () {
+          if (guard) { clearTimeout(guard); guard = null; }
+        };
+        a.onended = function () {
+          if (settled || token !== onlineToken) return;
+          if (guard) { clearTimeout(guard); guard = null; }
+          idx++;
+          playChunk();
+        };
+        a.onerror = function () { fail(false); };
         onlineActive = true;
         ttsMarkSpeaking(true);
+        a.src = baiduTtsUrl(chunks[myIdx]);
         if (guard) clearTimeout(guard);
-        // 首块允许 7 秒（含网络与合成），后续块 9 秒；已开始或已缓冲好就不再拦
+        // 首块允许 4 秒（含网络与合成），后续块 6 秒；已开始或已缓冲好就不再拦
         guard = setTimeout(function () {
-          if (settled) return;
-          if (a.currentTime > 0.05) return;
+          if (settled || token !== onlineToken || idx !== myIdx) return;
+          if (!a.paused && a.currentTime > 0.05) return;
           if (a.readyState >= 3 && !a.paused) return;
           fail(false);
-        }, idx === 0 ? (IS_MOBILE ? 4000 : 7000) : (IS_MOBILE ? 6000 : 9000));
-        a.src = baiduTtsUrl(chunks[idx]);
+        }, myIdx === 0 ? (IS_MOBILE ? 4000 : 7000) : (IS_MOBILE ? 6000 : 9000));
         const pr = a.play();
         if (pr && pr.catch) pr.catch(function (err) {
           if (token !== onlineToken) return;
           fail(!!err && err.name === "NotAllowedError");
         });
-        prefetchNext();
-      } catch (err) { fail(); }
+      } catch (err) { fail(false); }
     }
 
     playChunk();
@@ -581,9 +643,13 @@
     const results = [];
     const finish = function () {
       const lines = [];
+      lines.push("版本：" + APP_BUILD);
       lines.push("浏览器：" + ttsBrowserName());
       lines.push("设备：" + (IS_MOBILE ? "移动端" : "桌面") + (IS_IOS ? "（iOS）" : "") + " · 触屏 " + (IS_TOUCH ? "是" : "否"));
       lines.push("英文系统语音：" + list.length + " 个（其中神经网络音 " + naturalCount + " 个）");
+      const chosen = resolveVoice();
+      lines.push("朗读方式：" + ((state && state.ttsMode) || "auto") + "；自动首选：" + (chosen ? chosen.name : "无系统英文语音"));
+      lines.push("联网：" + (navigator.onLine === false ? "否" : "是") + "；在线音频已解锁：" + (onlineAudioUnlocked ? "是" : "否"));
       for (const r of results) {
         lines.push((r.ok ? "✓ " : "✗ ") + r.name + (r.ok ? "，出声用时 " + (r.ms / 1000).toFixed(1) + " 秒" : "，" + r.note));
       }
@@ -599,7 +665,9 @@
       }
       lines.push(verdict);
       ttsDiagActive = false;
-      paint(lines.map(function (t) { return '<p class="mini-note">' + esc(t) + "</p>"; }).join(""));
+      lastTtsDiag = lines.join("\n");
+      paint(lines.map(function (t) { return '<p class="mini-note">' + esc(t) + "</p>"; }).join("")
+        + '<p class="mini-note"><button class="text-link" data-action="copy-tts-diag">复制诊断信息</button></p>');
     };
     const probeOne = function (i) {
       if (i >= top.length) { finish(); return; }
@@ -771,7 +839,7 @@
     nativeRunToken++;
     onlineToken++;
     onlineActive = false;
-    if (onlineAudio) { try { onlineAudio.pause(); } catch (err) {} }
+    clearOnlineAudio();
     builtinActive = false;
     if (speakDelay) { clearTimeout(speakDelay); speakDelay = null; }
     if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
@@ -791,6 +859,7 @@
   function ttsFirstGesture() {
     if (ttsGestureReady) return;
     ttsGestureReady = true;
+    try { unlockOnlineAudio(); } catch (err) {}
     try { refreshNativeVoices(); } catch (err) {}
     try {
       if ("speechSynthesis" in window && window.speechSynthesis.paused) window.speechSynthesis.resume();
@@ -823,21 +892,24 @@
       ttsMarkSpeaking(false);
     };
 
-    // 所有候选系统语音都失败后的兜底层：单词在线真人音 / 整句在线人声 / 离线音
+    // 所有候选系统语音都失败后的兜底层：单词在线真人音 / 整句在线人声 / 离线音。
+    // 如果已经读了一部分，只把「还没读的」交出去，绝不从开头重来。
     const fallback = function () {
       if (runId !== nativeRunToken) return;
       ttsMarkSpeaking(false);
-      if (text !== onlineFailedText && speakOnline(text, function () { speakBuiltin(text); })) {
+      const rest = chunkIdx > 0 ? chunks.slice(chunkIdx).join(" ") : text;
+      if (!rest) { finish(); return; }
+      if (rest !== onlineFailedText && isWordLike(rest) && speakOnline(rest, function () { speakBuiltin(rest); })) {
         if (!nativeFailNoted) {
           nativeFailNoted = true;
           toast("系统语音没出声，单词改用在线真人发音");
         }
         return;
       }
-      if (!isWordLike(text) && speakOnlineSentence(text, function (rest) { speakBuiltin(rest || text); })) {
+      if (!isWordLike(rest) && speakOnlineSentence(rest, function (more) { speakBuiltin(more || rest); })) {
         if (!nativeFailNoted) {
           nativeFailNoted = true;
-          toast("系统语音没出声，整句改用在线人声");
+          toast(chunkIdx > 0 ? "系统语音中断，剩下的改用在线人声接着读" : "系统语音没出声，整句改用在线人声");
         }
         return;
       }
@@ -847,7 +919,7 @@
           ? "系统语音没能读出声，暂用离线机械音。想要自然人声：在系统设置里安装英文语音包，或改用 Edge 手机版打开"
           : "系统语音没能读出声，暂用离线机械音。想要自然人声：用 Microsoft Edge 打开本页");
       }
-      speakBuiltin(text);
+      speakBuiltin(rest);
     };
 
     const markDead = function (voice) {
@@ -855,20 +927,31 @@
     };
 
     let speakChunk = null;
+    let voiceRetries = 0;
 
     const failVoice = function (note) {
       if (runId !== nativeRunToken) return;
       if (ttsWatch) { clearTimeout(ttsWatch); ttsWatch = null; }
-      if (candidates[voiceIdx]) markDead(candidates[voiceIdx]);
       try { synth.cancel(); } catch (err) {}
       try { if (IS_IOS && synth.resume) synth.resume(); } catch (err) {}
+      // 同一条语音先原地重试一次：移动端偶发 interrupted / 启动超时很常见，
+      // 一次失败就换声会把本来自然的声音过早换成机械音
+      if (voiceRetries < 1) {
+        voiceRetries++;
+        speakDelay = setTimeout(function () {
+          if (runId === nativeRunToken) speakChunk();
+        }, IS_MOBILE ? 220 : 100);
+        return;
+      }
+      voiceRetries = 0;
+      if (candidates[voiceIdx]) markDead(candidates[voiceIdx]);
       voiceIdx++;
-      chunkIdx = 0;
+      // 已经读过一部分时保留当前位置，换声后接着读，不回头重读
       if (voiceIdx >= candidates.length) { fallback(); return; }
       if (note && !nativeFailNoted) { nativeFailNoted = true; toast(note); }
       speakDelay = setTimeout(function () {
         if (runId === nativeRunToken) speakChunk();
-      }, IS_MOBILE ? 60 : 80);
+      }, IS_MOBILE ? 80 : 80);
     };
 
     const finishChunk = function () {
@@ -935,12 +1018,18 @@
         ttsWatch = setTimeout(stallCheck, Math.max(6000, Math.round(part.length * 95)));
       };
       u.onend = function () { ok(); };
-      u.onerror = function () { bad("当前朗读声音没读出来，已换其他系统语音"); };
+      u.onerror = function (e) {
+        const code = e && e.error ? String(e.error) : "";
+        const soft = code === "interrupted" || code === "canceled";
+        bad(soft ? "" : "当前朗读声音中断，已换其他语音接着读");
+      };
 
       try { synth.speak(u); } catch (err) { bad(""); return; }
       ttsMarkSpeaking(true);
-      // 启动看门狗：冷启动/低端机慢一些；引擎还在合成时不断续期
-      const firstWait = IS_MOBILE ? 7000 : 4800;
+      // 启动看门狗：首段冷启动慢一些；后续段正常应在两秒内接上
+      const firstWait = chunkIdx === 0
+        ? (IS_MOBILE ? 7000 : 4800)
+        : (IS_MOBILE ? 3500 : 3000);
       const limit = IS_MOBILE ? 15000 : 10000;
       const watchTick = function () {
         if (settled || runId !== nativeRunToken) return;
@@ -986,8 +1075,9 @@
   function speak(text) {
     text = speechText(text);
     if (!text) return;
-    // 新的一次朗读先掐掉上一段在线音频，避免两段声音叠在一起
-    if (onlineAudio) { try { onlineAudio.pause(); } catch (err) {} onlineAudio = null; }
+    // 新的一次朗读先掐掉上一段在线音频，避免两段声音叠在一起；
+    // 但保留这个音频元素本身，手机端后续分段还要靠它继续播放
+    clearOnlineAudio();
     onlineToken++;
     onlineActive = false;
     try { refreshNativeVoices(); } catch (err) {}
@@ -1536,7 +1626,7 @@
   }
 
   function footerNote() {
-    return `<p class="footer-note"><span>研墨 · 考研英语</span><span>篇目与例句为原创仿真材料，供备考练习使用</span></p>`;
+    return `<p class="footer-note"><span>研墨 · 考研英语 · v${APP_BUILD}</span><span>篇目与例句为原创仿真材料，供备考练习使用</span></p>`;
   }
 
   function updateSidebar() {
@@ -5935,6 +6025,14 @@
       }
       case "tts-diag":
         runTtsDiag();
+        break;
+      case "copy-tts-diag":
+        if (!lastTtsDiag) { toast("请先点「语音自检」"); break; }
+        copyText(lastTtsDiag).then(function () {
+          toast("诊断信息已复制，可直接发给我");
+        }).catch(function () {
+          toast("复制失败，请长按上方文字选择复制");
+        });
         break;
       case "set-rate": {
         if (["slow", "normal", "fast"].indexOf(data.rate) !== -1) {

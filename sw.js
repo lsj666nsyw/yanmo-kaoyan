@@ -1,7 +1,7 @@
 /* 研墨 · 考研英语 — 离线缓存
    单文件版本身可离线打开；这里让在线版在首次加载后也能断网重开。
    更新部署时请把 CACHE 的版本号改掉（例如日期 +1），否则浏览器会继续用旧缓存。 */
-const CACHE = "yanmo-kaoyan-v1-20261024-7";
+const CACHE = "yanmo-kaoyan-v1-20261025-8";
 const CORE = [
   "./",
   "./index.html",
@@ -43,11 +43,11 @@ self.addEventListener("fetch", function (event) {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.endsWith("/sw.js")) return;
 
-  // 页面导航：优先拿新版本；断网时回到缓存的首页。
-  // 导航响应不写入缓存，避免 ?query 之类的一次性地址越攒越多。
+  // 页面导航与代码文件：联网时直接取最新，避免手机一直跑旧缓存；
+  // 断网时再用缓存兜底。
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req).catch(function () {
+      fetch(req, { cache: "no-store" }).catch(function () {
         return caches.match("./index.html").then(function (hit) {
           return hit || caches.match("./");
         });
@@ -56,7 +56,22 @@ self.addEventListener("fetch", function (event) {
     return;
   }
 
-  // 静态资源：先给缓存（秒开），后台再取新版本；首次访问则直接走网络。
+  if (/\/(?:js\/app\.js|assets\/style\.css)$/.test(url.pathname)) {
+    event.respondWith(
+      fetch(req, { cache: "no-store" }).then(function (res) {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then(function (cache) { return cache.put(req, copy); }).catch(function () {});
+        }
+        return res;
+      }).catch(function () {
+        return caches.match(req);
+      })
+    );
+    return;
+  }
+
+  // 其余静态资源：先给缓存（秒开），后台再取新版本；首次访问则直接走网络。
   event.respondWith(
     caches.match(req).then(function (hit) {
       const network = fetch(req).then(function (res) {
