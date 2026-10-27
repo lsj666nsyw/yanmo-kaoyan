@@ -13,7 +13,7 @@
 <meta name="format-detection" content="telephone=no">
 <meta name="description" content="研墨 · 考研英语精读手册：词汇、长难句、阅读、完形、翻译、写作与备考规划。">
 <meta name="application-name" content="研墨">
-<meta name="app-build" content="2026-10-27.1">
+<meta name="app-build" content="2026-10-27.2">
 <title>研墨 · 考研英语</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%2398392a'/%3E%3Ctext x='32' y='46' font-family='Georgia,serif' font-size='40' fill='%23f7f5ef' text-anchor='middle'%3E%E7%A0%94%3C/text%3E%3C/svg%3E">
 <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
@@ -96,7 +96,7 @@
 </nav>
 
 <div class="backdrop" id="backdrop" data-action="close-drawer" hidden></div>
-<aside class="drawer" id="drawer" aria-hidden="true" aria-label="词条详情"></aside>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="false" tabindex="-1" aria-hidden="true" aria-label="词条详情"></aside>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="importFile" accept="application/json,.json" hidden>
 
@@ -109,6 +109,13 @@
     var secure = location.protocol === "https:"
       || location.hostname === "localhost"
       || location.hostname === "127.0.0.1";
+    window.__yanmoHadController = !!navigator.serviceWorker.controller;
+    window.__yanmoUpdated = false;
+    if (window.__yanmoHadController) {
+      navigator.serviceWorker.addEventListener("controllerchange", function () {
+        window.__yanmoUpdated = true;
+      });
+    }
     if (secure) {
       navigator.serviceWorker.register("sw.js?v=" + encodeURIComponent(build)).catch(function () {});
     }

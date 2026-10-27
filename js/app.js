@@ -2,7 +2,7 @@
   "use strict";
 
   // 显示在页脚与语音自检里，方便确认手机上跑的是不是最新版本
-  const APP_BUILD = (document.querySelector('meta[name="app-build"]') || {}).content || "2026-10-27.1";
+  const APP_BUILD = (document.querySelector('meta[name="app-build"]') || {}).content || "2026-10-27.2";
 
   /* ------------------------------------------------------------------
      data
@@ -81,6 +81,58 @@
   }
 
   function todayKey() { return ymd(new Date()); }
+
+  function formatBytes(n) {
+    const v = Number(n);
+    if (!isFinite(v) || v <= 0) return "0 B";
+    if (v < 1024) return Math.round(v) + " B";
+    if (v < 1024 * 1024) return (v / 1024).toFixed(1) + " KB";
+    if (v < 1024 * 1024 * 1024) return (v / (1024 * 1024)).toFixed(1) + " MB";
+    return (v / (1024 * 1024 * 1024)).toFixed(1) + " GB";
+  }
+
+  function backupAgeDays() {
+    const t = Date.parse(state.lastExportAt || "");
+    if (!isFinite(t)) return null;
+    return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+  }
+
+  function backupDue() {
+    const days = backupAgeDays();
+    return days === null || days >= 14;
+  }
+
+  function backupLine() {
+    const days = backupAgeDays();
+    if (days === null) return "还没有导出过备份。";
+    if (days === 0) return "上次备份：今天。";
+    return "上次备份：" + days + " 天前。";
+  }
+
+  function backupHint() {
+    const days = backupAgeDays();
+    if (days === null) return "建议先导出一次，换设备或清理浏览器后可恢复。";
+    if (days >= 14) return "已超过两周没有备份，建议现在导出一次。";
+    return "备份文件可恢复背词、错题、模考和打卡记录。";
+  }
+
+  function backupSummary(s) {
+    const src = s || {};
+    const words = Object.keys(src.words || {}).length;
+    const notebook = Array.isArray(src.notebook) ? src.notebook.length : 0;
+    const mistakes = Array.isArray(src.mistakes) ? src.mistakes.length : 0;
+    const days = Object.keys(src.days || {}).filter(function (k) { return isActiveDay(src.days[k]); }).length;
+    const exams = Array.isArray(src.exams) ? src.exams.length : 0;
+    const drafts = Object.keys(src.drafts || {}).length;
+    const bits = [];
+    if (words) bits.push(words + " 个背词标记");
+    if (notebook) bits.push(notebook + " 个生词");
+    if (mistakes) bits.push(mistakes + " 道错题");
+    if (days) bits.push(days + " 天学习记录");
+    if (exams) bits.push(exams + " 次模考");
+    if (drafts) bits.push(drafts + " 篇写作草稿");
+    return bits.length ? bits.join("、") : "没有可统计的学习记录";
+  }
 
   function addDays(date, n) {
     const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -1185,6 +1237,7 @@
       ttsVoice: "",
       ttsRate: "normal",
       cardAutoplay: false,
+      lastExportAt: "",
       words: {},
       srs: {},
       notebook: [],
@@ -1307,6 +1360,9 @@
     merged.ttsVoice = typeof merged.ttsVoice === "string" ? merged.ttsVoice.slice(0, 160) : "";
     merged.ttsRate = ["slow", "normal", "fast"].indexOf(merged.ttsRate) !== -1 ? merged.ttsRate : "normal";
     merged.cardAutoplay = !!merged.cardAutoplay;
+    merged.lastExportAt = typeof raw.lastExportAt === "string" && isFinite(Date.parse(raw.lastExportAt))
+      ? new Date(raw.lastExportAt).toISOString()
+      : "";
     return merged;
   }
 
@@ -1549,6 +1605,8 @@
     dictation: null,
     drawerWord: null,
     drawerList: [],
+    drawerReturnFocus: null,
+    drawerFocusPending: false,
     readId: null,
     readStart: null,
     writingTab: "small",
@@ -2215,7 +2273,7 @@
       </div>
       <div class="drawer-body">
         <div class="drawer-word">
-          <h2 class="${longClass}">${esc(w.w)}</h2>
+          <h2 id="drawerTitle" class="${longClass}">${esc(w.w)}</h2>
           <p class="ph">${detailPh(w) ? "/" + esc(detailPh(w)) + "/" : ""} ${w.pos ? "· " + esc(w.pos) : ""}</p>
         </div>
         <div class="drawer-tags">${w.tag ? `<span class="${tagClass(w.tag)}">${tagLabel(w.tag)}</span>` : ""}<span class="${st.cls === "known" ? "tag green" : "tag"}">${st.label || "未标记"}</span></div>
@@ -2249,14 +2307,29 @@
         </div>
       </div>`;
     drawer.classList.add("open");
+    drawer.setAttribute("role", "dialog");
+    drawer.setAttribute("aria-modal", "true");
+    drawer.setAttribute("aria-labelledby", "drawerTitle");
     drawer.setAttribute("aria-hidden", "false");
     backdrop.hidden = false;
     document.body.style.overflow = "hidden";
     drawer.scrollTop = 0;
+    if (ui.drawerFocusPending) {
+      ui.drawerFocusPending = false;
+      const close = drawer.querySelector('[data-action="close-drawer"]');
+      if (close) {
+        try { close.focus({ preventScroll: true }); } catch (err) { close.focus(); }
+      }
+    }
   }
 
   function openWord(word) {
     if (!WORD_MAP.has(word)) return;
+    if (!ui.drawerWord) {
+      const active = document.activeElement;
+      ui.drawerReturnFocus = active && active !== document.body ? active : null;
+      ui.drawerFocusPending = true;
+    }
     ui.drawerWord = word;
     const route = getRoute();
     if (route.name === "me") ui.drawerList = notebookWords();
@@ -2266,16 +2339,25 @@
     renderDrawer();
   }
 
-  function closeDrawer() {
+  function closeDrawer(restoreFocus) {
     const drawer = $("#drawer");
     const backdrop = $("#backdrop");
+    const returnFocus = ui.drawerReturnFocus;
     ui.drawerWord = null;
+    ui.drawerReturnFocus = null;
+    ui.drawerFocusPending = false;
     if (drawer) {
       drawer.classList.remove("open");
       drawer.setAttribute("aria-hidden", "true");
+      drawer.setAttribute("aria-modal", "false");
     }
     if (backdrop) backdrop.hidden = true;
     document.body.style.overflow = "";
+    if (restoreFocus !== false && returnFocus && returnFocus.isConnected) {
+      setTimeout(function () {
+        try { returnFocus.focus({ preventScroll: true }); } catch (err) { returnFocus.focus(); }
+      }, 0);
+    }
   }
 
   /* ------------------------------------------------------------------
@@ -2398,6 +2480,7 @@
         }
       }
     }
+    if (route.name === "me") refreshStorageInfo();
   }
 
   function rerender() {
@@ -6981,9 +7064,41 @@
         <div class="empty"><p class="mark">净</p><p>这个分类还没有错题。做完阅读、完形、七选五、排序或小标题，答错的题会自动收录。</p><div class="actions"><a class="btn btn-quiet" href="#/reading">去做阅读</a></div></div>`}`;
   }
 
+  function refreshStorageInfo() {
+    const status = $("#storageStatus");
+    const btn = $("#persistStorageBtn");
+    if (!status && !btn) return;
+    const setStatus = function (text) { if (status) status.textContent = text; };
+    const canPersist = !!(navigator.storage && navigator.storage.persist);
+    if (!navigator.storage || !navigator.storage.persisted) {
+      setStatus("当前浏览器不支持持久存储；请定期导出备份。");
+      if (btn) btn.classList.add("hidden");
+      return;
+    }
+    navigator.storage.persisted().then(function (persisted) {
+      let base = persisted
+        ? "本机存储：持久。浏览器不会在空间不足时自动清理学习记录。"
+        : "本机存储：普通。空间不足时可能被清理，建议申请持久存储并定期导出。";
+      if (!persisted && !canPersist) base = "本机存储：普通。当前浏览器不支持申请持久存储，请定期导出备份。";
+      setStatus(base);
+      if (btn) btn.classList.toggle("hidden", persisted || !canPersist);
+      if (navigator.storage.estimate) {
+        navigator.storage.estimate().then(function (est) {
+          if (est && est.usage > 0) setStatus(base + " 当前约用 " + formatBytes(est.usage) + "。");
+        }).catch(function () { /* 估算失败不影响状态显示 */ });
+      }
+    }).catch(function () {
+      setStatus("无法读取本机存储状态；建议定期导出备份。");
+      if (btn) btn.classList.add("hidden");
+    });
+  }
+
   function meRecords() {
     const trapLine = trapLifetimeLine();
     const offlineReady = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+    const offlineText = location.protocol === "file:"
+      ? "当前是离线单文件版，无需联网。"
+      : (offlineReady ? "已就绪，断网也能打开。" : "首次打开后自动准备；如果一直没就绪，刷新一次。");
     const rows = [];
     let totalTask = 0;
     let totalWord = 0;
@@ -7056,11 +7171,23 @@
           </div>
           <div class="settings-actions">
             <button class="btn btn-sm btn-quiet" data-action="print">打印规划</button>
-            <button class="btn btn-sm btn-quiet" data-action="export-data">导出记录</button>
-            <button class="btn btn-sm btn-quiet" data-action="import-data">导入记录</button>
             <button class="btn btn-sm btn-quiet danger" data-action="reset-data">清空记录</button>
           </div>
-          <p class="mini-note">离线缓存：${offlineReady ? "已就绪，断网也能打开。" : "首次打开后自动准备；如果一直没就绪，刷新一次。"}</p>
+          <div class="field">
+            <label>数据安全</label>
+            <p class="mini-note" id="backupStatus">${backupLine()} ${backupHint()}</p>
+            <div class="settings-actions">
+              <button class="btn btn-sm ${backupDue() ? "btn-accent" : "btn-quiet"}" data-action="export-data">导出记录</button>
+              <button class="btn btn-sm btn-quiet" data-action="import-data">导入记录</button>
+            </div>
+            <p class="mini-note" id="storageStatus">正在检查本机存储…</p>
+            <button class="btn btn-sm btn-quiet hidden" id="persistStorageBtn" data-action="persist-storage">申请持久存储</button>
+          </div>
+          <div class="field">
+            <label>离线与更新</label>
+            <p class="mini-note">离线缓存：${offlineText}</p>
+            <button class="btn btn-sm btn-quiet" data-action="check-update">检查更新</button>
+          </div>
         </aside>
       </div>`;
   }
@@ -7194,11 +7321,13 @@
 
       <section class="sum-backup">
         <div class="section-head"><h2>记录备份与恢复</h2><span class="section-note">数据只保存在本机浏览器</span></div>
-        <p class="sum-line">「导出记录」会生成一个 JSON 备份文件；换设备或清除浏览器后，用「导入记录」恢复全部进度（背词、错题、模考、打卡）。建议每周导出一次。</p>
+        <p class="sum-line" id="backupStatus">${backupLine()} ${backupHint()}</p>
+        <p class="mini-note" id="storageStatus">正在检查本机存储…</p>
         <div class="settings-actions">
-          <button class="btn btn-sm btn-quiet" data-action="export-data">导出记录</button>
+          <button class="btn btn-sm ${backupDue() ? "btn-accent" : "btn-quiet"}" data-action="export-data">导出记录</button>
           <button class="btn btn-sm btn-quiet" data-action="import-data">导入记录</button>
         </div>
+        <button class="btn btn-sm btn-quiet hidden" id="persistStorageBtn" data-action="persist-storage">申请持久存储</button>
       </section>`;
   }
 
@@ -8434,10 +8563,14 @@
         break;
       }
       case "export-data": {
+        const exportedAt = new Date().toISOString();
+        state.lastExportAt = exportedAt;
+        save();
         const payload = Object.assign({}, state, {
           app: "研墨 · 考研英语",
           format: "yanmo-kaoyan-backup-v1",
-          exportedAt: new Date().toISOString()
+          build: APP_BUILD,
+          exportedAt: exportedAt
         });
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
@@ -8449,6 +8582,44 @@
         document.body.removeChild(a);
         setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
         toast("记录已导出");
+        rerender();
+        break;
+      }
+      case "persist-storage": {
+        if (!navigator.storage || !navigator.storage.persist) {
+          toast("当前浏览器不支持持久存储，请定期导出备份");
+          break;
+        }
+        navigator.storage.persist().then(function (granted) {
+          toast(granted ? "已开启持久存储" : "浏览器暂未授予；建议定期导出备份");
+          refreshStorageInfo();
+        }).catch(function () {
+          toast("申请失败；建议定期导出备份");
+        });
+        break;
+      }
+      case "check-update": {
+        if (location.protocol === "file:") {
+          toast("当前是离线单文件版；在线版会自动检查更新");
+          break;
+        }
+        if (!("serviceWorker" in navigator)) {
+          toast("当前浏览器不支持离线更新");
+          break;
+        }
+        navigator.serviceWorker.getRegistration().then(function (reg) {
+          if (!reg) {
+            toast("离线缓存尚未注册，请刷新页面后再试");
+            return null;
+          }
+          return reg.update().then(function () {
+            if (reg.waiting) toast("发现新版本，刷新页面即可更新");
+            else if (reg.installing) toast("正在下载新版本，稍后刷新");
+            else toast("当前已是最新版本");
+          });
+        }).catch(function () {
+          toast("检查更新失败，请稍后再试");
+        });
         break;
       }
       case "reset-data": {
@@ -8474,7 +8645,7 @@
         ui.readStart = null;
         ui.readFocusKey = null;
         ui.scrollDiag = false;
-        closeDrawer();
+        closeDrawer(false);
         save();
         render();
         toast("记录已清空");
@@ -8682,14 +8853,31 @@
         const file = t.files && t.files[0];
         t.value = "";
         if (!file) return;
-        if (!window.confirm("导入会覆盖当前记录，确定继续？")) return;
         const reader = new FileReader();
         reader.onload = function () {
           try {
             const raw = JSON.parse(String(reader.result));
             if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("bad");
-            delete raw.exportedAt;
+            if (raw.format && raw.format !== "yanmo-kaoyan-backup-v1") throw new Error("format");
+            const known = [
+              "words", "srs", "notebook", "mistakes", "days", "reading",
+              "clozes", "sevens", "orders", "headings", "cloze", "seven",
+              "translations", "drafts", "transSelf", "draftSelf", "trapStats",
+              "exams", "examActive"
+            ];
+            const hasKnown = known.some(function (k) {
+              return Object.prototype.hasOwnProperty.call(raw, k);
+            });
+            if (!hasKnown) throw new Error("empty");
             const next = normalizeState(raw);
+            const exported = raw.exportedAt || raw.lastExportAt;
+            const exportedTime = exported ? Date.parse(exported) : NaN;
+            if (isFinite(exportedTime)) next.lastExportAt = new Date(exportedTime).toISOString();
+            const summary = backupSummary(next);
+            const when = isFinite(exportedTime)
+              ? new Date(exportedTime).toLocaleString("zh-CN", { hour12: false })
+              : "未注明";
+            if (!window.confirm("导入会覆盖当前记录。\n\n备份时间：" + when + "\n\n备份内容：" + summary + "\n\n确定继续？")) return;
             Object.keys(state).forEach(function (k) { delete state[k]; });
             Object.assign(state, next);
             ui.cardIndex = 0;
@@ -8706,17 +8894,10 @@
             ui.transOpen = {};
             ui.readId = null;
             ui.readStart = null;
-            closeDrawer();
+            closeDrawer(false);
             save();
             render();
-            toast("记录已导入" + (function (n) {
-              const words = Object.keys(next.words || {}).length + (next.notebook || []).length;
-              const exams = Array.isArray(next.exams) ? next.exams.length : 0;
-              const bits = [];
-              if (words) bits.push(words + " 个词标记");
-              if (exams) bits.push(exams + " 次模考");
-              return n && bits.length ? "（" + bits.join("，") + "）" : "";
-            })(1));
+            toast("记录已导入");
           } catch (err) {
             toast("导入失败：不是有效的记录文件");
           }
@@ -8728,10 +8909,39 @@
 
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") {
+        const more = document.querySelector(".mobile-more[open]");
+        if (more) {
+          more.open = false;
+          const summary = more.querySelector("summary");
+          if (summary) summary.focus();
+          return;
+        }
         if (ui.drawerWord) closeDrawer();
         return;
       }
-      if (ui.drawerWord) return;
+      if (ui.drawerWord) {
+        if (e.key === "Tab") {
+          const drawer = $("#drawer");
+          if (drawer) {
+            const focusables = $$('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])', drawer);
+            if (!focusables.length) {
+              e.preventDefault();
+              drawer.focus();
+              return;
+            }
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            if (e.shiftKey && (document.activeElement === first || !drawer.contains(document.activeElement))) {
+              e.preventDefault();
+              last.focus();
+            } else if (!e.shiftKey && (document.activeElement === last || !drawer.contains(document.activeElement))) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
+        }
+        return;
+      }
       const tag = document.activeElement ? document.activeElement.tagName : "";
       const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
       const route = getRoute();
@@ -8800,7 +9010,7 @@
     }
 
     window.addEventListener("hashchange", function () {
-      closeDrawer();
+      closeDrawer(false);
       render({ routeChange: true });
     });
   }
@@ -8817,6 +9027,17 @@
       || location.hostname === "localhost"
       || location.hostname === "127.0.0.1";
     if (!secure) return;
+    const hadController = typeof window.__yanmoHadController === "boolean"
+      ? window.__yanmoHadController
+      : !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+      if (hadController) {
+        window.__yanmoUpdated = false;
+        toast("已更新到新版本，刷新页面后生效");
+      } else if (getRoute().name === "me") {
+        rerender();
+      }
+    });
     window.addEventListener("load", function () {
       navigator.serviceWorker.register("sw.js?v=" + encodeURIComponent(APP_BUILD)).catch(function () { /* 离线增强失败不影响主功能 */ });
     });
@@ -8828,5 +9049,9 @@
   setInterval(readingTick, 1000);
   setInterval(examTick, 500);
   render();
+  if (window.__yanmoUpdated) {
+    window.__yanmoUpdated = false;
+    setTimeout(function () { toast("已更新到新版本，刷新页面后生效"); }, 600);
+  }
 
 })();

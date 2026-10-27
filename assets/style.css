@@ -1719,6 +1719,7 @@ mark { background: #eee0d3; color: inherit; padding: 0 2px; }
   .checklist.two-col li:nth-last-child(2) { border-bottom: 1px solid var(--line-2); }
   .settings-actions { grid-template-columns: 1fr; }
   .settings-actions .danger { grid-column: auto; }
+  .settings-box .btn { min-height: 44px; }
   .order-list li { grid-template-columns: 26px minmax(0, 1fr); gap: 4px 12px; }
   .order-time { grid-column: 2; }
   .trans-head { align-items: flex-start; flex-direction: column; gap: 8px; }
