@@ -2,7 +2,7 @@
   "use strict";
 
   // 显示在页脚与语音自检里，方便确认手机上跑的是不是最新版本
-  const APP_BUILD = (document.querySelector('meta[name="app-build"]') || {}).content || "2026-10-27.2";
+  const APP_BUILD = (document.querySelector('meta[name="app-build"]') || {}).content || "2026-10-27.3";
 
   /* ------------------------------------------------------------------
      data
@@ -1169,6 +1169,10 @@
   ------------------------------------------------------------------ */
 
   const KEY = "yanmo.kaoyan.v1";
+  const SNAPSHOT_KEY = "yanmo.kaoyan.snapshots.v1";
+  const SNAPSHOT_LIMIT = 3;
+  let storageWriteFailed = false;
+  let storageWarned = false;
 
   function clozeSets() {
     return (window.CLOZES && window.CLOZES.length) ? window.CLOZES : [window.CLOZE];
@@ -1407,7 +1411,143 @@
   });
 
   function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (err) { /* local file may block storage */ }
+    try {
+      localStorage.setItem(KEY, JSON.stringify(state));
+      if (storageWriteFailed) {
+        storageWriteFailed = false;
+        storageWarned = false;
+      }
+    } catch (err) {
+      storageWriteFailed = true;
+      if (!storageWarned) {
+        storageWarned = true;
+        setTimeout(function () {
+          if (storageWriteFailed) toast("本机存储写入失败：请立即导出备份");
+        }, 60);
+      }
+    }
+  }
+
+  function snapshotTime(iso) {
+    const t = Date.parse(iso || "");
+    if (!isFinite(t)) return "时间未知";
+    const d = new Date(t);
+    const pad = function (n) { return String(n).padStart(2, "0"); };
+    return (d.getMonth() + 1) + "月" + d.getDate() + "日 " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  function readSnapshots() {
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(SNAPSHOT_KEY) || "[]"); } catch (err) { list = []; }
+    if (!Array.isArray(list)) return [];
+    return list.filter(function (s) {
+      return s && typeof s.at === "string" && isFinite(Date.parse(s.at)) &&
+        s.data && typeof s.data === "object" && !Array.isArray(s.data);
+    }).slice(0, SNAPSHOT_LIMIT);
+  }
+
+  function writeSnapshots(list) {
+    const next = list.slice();
+    while (next.length) {
+      try {
+        localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(next));
+        return true;
+      } catch (err) {
+        next.pop();
+      }
+    }
+    storageWriteFailed = true;
+    return false;
+  }
+
+  function saveSnapshot(reason) {
+    let data;
+    try { data = JSON.parse(JSON.stringify(state)); } catch (err) { return false; }
+    const list = readSnapshots();
+    list.unshift({
+      at: new Date().toISOString(),
+      reason: reason || "手动",
+      summary: backupSummary(data),
+      data: data
+    });
+    return writeSnapshots(list.slice(0, SNAPSHOT_LIMIT));
+  }
+
+  function resetTransientUi() {
+    ui.cardIndex = 0;
+    ui.cardFlipped = false;
+    ui.cardSession = { known: 0, fuzzy: 0, unknown: 0, graded: 0 };
+    ui.reviewDeck = null;
+    ui.spell = null;
+    ui.redo = {};
+    ui.reviewed = {};
+    ui.sentenceOpen = {};
+    ui.sentenceOpened = {};
+    ui.mistakeFilter = "全部";
+    ui.notebookFilter = "all";
+    ui.clozeSet = 0;
+    ui.sevenSet = 0;
+    ui.orderSet = 0;
+    ui.headingSet = 0;
+    ui.transOpen = {};
+    ui.readId = null;
+    ui.readStart = null;
+    ui.readFocusKey = null;
+    ui.scrollDiag = false;
+    closeDrawer(false);
+  }
+
+  function snapshotPanel() {
+    const list = readSnapshots();
+    const rows = list.map(function (s, i) {
+      return `<div class="snapshot-row">
+        <div class="snapshot-main">
+          <b>${esc(s.reason || "快照")}</b>
+          <span>${esc(snapshotTime(s.at))}</span>
+          <em>${esc(s.summary || "没有可统计的学习记录")}</em>
+        </div>
+        <button class="text-link" data-action="restore-snapshot" data-i="${i}">恢复</button>
+      </div>`;
+    }).join("");
+    return `<div class="snapshot-box">
+      <div class="snapshot-head"><span>自动快照</span><span>${list.length} / ${SNAPSHOT_LIMIT}</span></div>
+      ${list.length ? `<div class="snapshot-list">${rows}</div>` : `<p class="mini-note">导入或清空前会自动保存最近三份；也可以手动保存当前状态。</p>`}
+      ${storageWriteFailed ? `<p class="mini-note storage-warning">本机存储写入失败，快照可能无法保存；请先导出备份。</p>` : ""}
+      <div class="settings-actions">
+        <button class="btn btn-sm btn-quiet" data-action="snapshot-now">保存当前快照</button>
+        ${list.length ? `<button class="btn btn-sm btn-quiet" data-action="restore-latest">恢复最近一份</button>` : ""}
+      </div>
+      ${list.length ? `<button class="text-link muted snapshot-clear" data-action="clear-snapshots">删除全部快照</button>` : ""}
+      <p class="mini-note">快照也只保存在本机；清理站点数据会一起丢失，重要进度仍请导出备份。</p>
+    </div>`;
+  }
+
+  function restoreSnapshot(index) {
+    const list = readSnapshots();
+    const snap = list[Number(index)];
+    if (!snap) {
+      toast("快照不存在");
+      return;
+    }
+    const when = snapshotTime(snap.at);
+    if (!window.confirm("恢复 " + when + " 的" + (snap.reason || "快照") + "？\n\n当前记录会先保存为一份“恢复前”快照。\n\n" + (snap.summary || ""))) return;
+    if (!saveSnapshot("恢复前")) {
+      toast("当前记录快照保存失败，已取消恢复");
+      return;
+    }
+    let next;
+    try {
+      next = normalizeState(snap.data);
+    } catch (err) {
+      toast("快照内容损坏，未恢复");
+      return;
+    }
+    Object.keys(state).forEach(function (k) { delete state[k]; });
+    Object.assign(state, next);
+    resetTransientUi();
+    save();
+    render();
+    toast("已恢复 " + when + " 的快照");
   }
 
   function ensureDay(key) {
@@ -7069,6 +7209,11 @@
     const btn = $("#persistStorageBtn");
     if (!status && !btn) return;
     const setStatus = function (text) { if (status) status.textContent = text; };
+    if (storageWriteFailed) {
+      setStatus("本机存储写入失败：请立即导出备份，并检查浏览器存储空间。");
+      if (btn) btn.classList.add("hidden");
+      return;
+    }
     const canPersist = !!(navigator.storage && navigator.storage.persist);
     if (!navigator.storage || !navigator.storage.persisted) {
       setStatus("当前浏览器不支持持久存储；请定期导出备份。");
@@ -7180,6 +7325,7 @@
               <button class="btn btn-sm ${backupDue() ? "btn-accent" : "btn-quiet"}" data-action="export-data">导出记录</button>
               <button class="btn btn-sm btn-quiet" data-action="import-data">导入记录</button>
             </div>
+            ${snapshotPanel()}
             <p class="mini-note" id="storageStatus">正在检查本机存储…</p>
             <button class="btn btn-sm btn-quiet hidden" id="persistStorageBtn" data-action="persist-storage">申请持久存储</button>
           </div>
@@ -7327,6 +7473,7 @@
           <button class="btn btn-sm ${backupDue() ? "btn-accent" : "btn-quiet"}" data-action="export-data">导出记录</button>
           <button class="btn btn-sm btn-quiet" data-action="import-data">导入记录</button>
         </div>
+        ${snapshotPanel()}
         <button class="btn btn-sm btn-quiet hidden" id="persistStorageBtn" data-action="persist-storage">申请持久存储</button>
       </section>`;
   }
@@ -8623,7 +8770,8 @@
         break;
       }
       case "reset-data": {
-        if (!window.confirm("确定清空所有背词标记、生词本、错题、翻译草稿和计时记录？此操作不可恢复。")) break;
+        if (!window.confirm("确定清空所有背词标记、生词本、错题、翻译草稿和计时记录？\n\n清空前会自动保存一份快照，可在“数据安全”中恢复。")) break;
+        if (!saveSnapshot("清空前") && !window.confirm("自动快照保存失败。仍要清空吗？建议先导出当前记录。")) break;
         try { localStorage.removeItem(KEY); } catch (err) { /* ignore */ }
         Object.keys(state).forEach(function (k) { delete state[k]; });
         Object.assign(state, defaultState());
@@ -8648,7 +8796,29 @@
         closeDrawer(false);
         save();
         render();
-        toast("记录已清空");
+        toast("记录已清空，可在“数据安全”中恢复");
+        break;
+      }
+      case "snapshot-now": {
+        const ok = saveSnapshot("手动");
+        rerender();
+        toast(ok ? "已保存当前快照" : "快照保存失败，请先导出备份");
+        break;
+      }
+      case "restore-latest": {
+        restoreSnapshot(0);
+        break;
+      }
+      case "restore-snapshot": {
+        const index = Number(data.i);
+        restoreSnapshot(isFinite(index) ? index : 0);
+        break;
+      }
+      case "clear-snapshots": {
+        if (!window.confirm("删除全部自动快照？删除后无法恢复这些快照。")) break;
+        try { localStorage.removeItem(SNAPSHOT_KEY); } catch (err) { /* ignore */ }
+        rerender();
+        toast("快照已删除");
         break;
       }
       default:
@@ -8877,7 +9047,8 @@
             const when = isFinite(exportedTime)
               ? new Date(exportedTime).toLocaleString("zh-CN", { hour12: false })
               : "未注明";
-            if (!window.confirm("导入会覆盖当前记录。\n\n备份时间：" + when + "\n\n备份内容：" + summary + "\n\n确定继续？")) return;
+            if (!window.confirm("导入会覆盖当前记录。\n\n导入前会自动保存一份快照，可在“数据安全”中恢复。\n\n备份时间：" + when + "\n\n备份内容：" + summary + "\n\n确定继续？")) return;
+            if (!saveSnapshot("导入前") && !window.confirm("自动快照保存失败。仍要导入吗？建议先导出当前记录。")) return;
             Object.keys(state).forEach(function (k) { delete state[k]; });
             Object.assign(state, next);
             ui.cardIndex = 0;
@@ -8897,7 +9068,7 @@
             closeDrawer(false);
             save();
             render();
-            toast("记录已导入");
+            toast("记录已导入，可在“数据安全”中恢复导入前状态");
           } catch (err) {
             toast("导入失败：不是有效的记录文件");
           }
