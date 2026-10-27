@@ -13,6 +13,11 @@ const mobileFile = path.join(root, "yanmo-kaoyan-mobile.html");
 
 let html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 
+// 单文件版通过 file:// 打开，不注册 manifest，也不请求外部 PWA 图标。
+html = html.replace(/<link rel="manifest"[^>]*>\s*/g, "");
+html = html.replace(/<link rel="apple-touch-icon"[^>]*>\s*/g, "");
+html = html.replace(/<link rel="icon" type="image\/png"[^>]*>\s*/g, "");
+
 // 内联样式表
 html = html.replace(/<link rel="stylesheet" href="([^"]+)">/g, function (m, href) {
   const css = fs.readFileSync(path.join(root, href), "utf8");

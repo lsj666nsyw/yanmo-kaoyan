@@ -1,0 +1,57 @@
+{
+  "id": "./",
+  "name": "研墨 · 考研英语",
+  "short_name": "研墨",
+  "description": "考研英语精读手册：词汇、长难句、阅读、完形、翻译、写作与备考规划。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f5ef",
+  "theme_color": "#98392a",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "今日",
+      "short_name": "今日",
+      "url": "./#/home"
+    },
+    {
+      "name": "背词",
+      "short_name": "词汇",
+      "url": "./#/vocab"
+    },
+    {
+      "name": "全真模考",
+      "short_name": "模考",
+      "url": "./#/exam"
+    },
+    {
+      "name": "我的记录",
+      "short_name": "我的",
+      "url": "./#/me"
+    }
+  ]
+}

@@ -215,6 +215,7 @@ em { font-style: normal; }
 .btn-quiet { border-color: var(--line); color: var(--ink-2); }
 .btn-quiet:hover { background: var(--paper-2); color: var(--ink); border-color: var(--line); }
 .btn-sm { min-height: 30px; padding: 5px 11px; font-size: 11px; }
+.btn-install { min-height: 44px; padding-left: 16px; padding-right: 16px; }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
 .btn:disabled:hover { background: transparent; color: var(--ink); }
 
@@ -2509,6 +2510,16 @@ mark { background: #eee0d3; color: inherit; padding: 0 2px; }
 .boot-copy {
   margin: 9px 0 0; font-size: 12px; line-height: 1.8; color: var(--muted);
 }
+.boot-actions { margin-top: 18px; }
+.boot-actions[hidden] { display: none; }
+.boot-retry {
+  min-height: 44px; padding: 9px 18px; border: 1px solid var(--accent);
+  background: var(--accent); color: var(--paper); font: inherit; font-size: 12px;
+  cursor: pointer;
+}
+.boot-hint {
+  margin: 12px 0 0; font-size: 11.5px; line-height: 1.7; color: var(--faint);
+}
 
 /* ---------- mobile bottom navigation ---------- */
 
@@ -2549,7 +2560,9 @@ mark { background: #eee0d3; color: inherit; padding: 0 2px; }
   }
   .mobile-more-menu {
     position: absolute; right: 0; bottom: calc(100% + 9px);
-    width: 174px; padding: 6px;
+    width: 174px; max-height: calc(100vh - 110px); max-height: calc(100dvh - 110px);
+    overflow-y: auto; overscroll-behavior: contain;
+    padding: 6px;
     border: 1px solid var(--line);
     background: var(--card);
     box-shadow: 0 14px 36px rgba(28, 27, 23, .14);

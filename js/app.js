@@ -2,7 +2,7 @@
   "use strict";
 
   // 显示在页脚与语音自检里，方便确认手机上跑的是不是最新版本
-  const APP_BUILD = "2026-10-25.4";
+  const APP_BUILD = (document.querySelector('meta[name="app-build"]') || {}).content || "2026-10-27.1";
 
   /* ------------------------------------------------------------------
      data
@@ -1333,6 +1333,16 @@
   ];
 
   const state = loadState();
+  let deferredInstallPrompt = null;
+
+  window.addEventListener("beforeinstallprompt", function (event) {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+  });
+  window.addEventListener("appinstalled", function () {
+    deferredInstallPrompt = null;
+    toast("已安装到桌面");
+  });
 
   window.addEventListener("vocabdetailready", function () {
     if (ui.drawerWord) renderDrawer();
@@ -2302,12 +2312,21 @@
     $("#main").innerHTML = html + footerNote();
     document.body.classList.toggle("exam-run-mode", route.name === "exam" && route.param === "run");
     $$("[data-nav]").forEach(function (a) {
-      a.classList.toggle("active", a.getAttribute("data-nav") === route.name);
+      const on = a.getAttribute("data-nav") === route.name;
+      a.classList.toggle("active", on);
+      if (on) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
     });
     const mobileMore = document.querySelector(".mobile-more");
     if (mobileMore) {
+      const moreOn = ["sentences", "cloze", "translation", "writing", "plan"].indexOf(route.name) !== -1;
       mobileMore.open = false;
-      mobileMore.classList.toggle("active", ["sentences", "cloze", "translation", "writing", "plan"].indexOf(route.name) !== -1);
+      mobileMore.classList.toggle("active", moreOn);
+      const summary = mobileMore.querySelector("summary");
+      if (summary) {
+        if (moreOn) summary.setAttribute("aria-current", "page");
+        else summary.removeAttribute("aria-current");
+      }
     }
     updateSidebar();
     document.title = (PAGE_TITLES[route.name] || "研墨") + " · 研墨";
@@ -2315,6 +2334,12 @@
     if (opt.keepScroll) window.scrollTo(0, scrollY);
     else window.scrollTo(0, 0);
 
+    if (opt.routeChange) {
+      const main = $("#main");
+      if (main) {
+        try { main.focus({ preventScroll: true }); } catch (err) { main.focus(); }
+      }
+    }
     afterRender(route);
   }
 
@@ -6957,7 +6982,9 @@
   }
 
   function meRecords() {
-    const trapLine = trapLifetimeLine();    const rows = [];
+    const trapLine = trapLifetimeLine();
+    const offlineReady = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+    const rows = [];
     let totalTask = 0;
     let totalWord = 0;
     let totalMin = 0;
@@ -6997,6 +7024,11 @@
           </div>
           <p class="mini-note">修改后倒计时与今日任务会立即更新。建议每天 20–50 词，按能复习完的量来定。</p>
           <div class="field">
+            <label>安装到手机桌面</label>
+            <p class="mini-note">安装后从桌面直接打开，离线也能用。iPhone 用 Safari 的“分享 → 添加到主屏幕”。</p>
+            <button class="btn btn-sm btn-quiet btn-install" data-action="install-app">安装 / 添加到桌面</button>
+          </div>
+          <div class="field">
             <label>朗读方式</label>
             <div class="chips">
               <button class="chip ${state.ttsMode === "auto" ? "on" : ""}" data-action="set-tts" data-mode="auto">自动</button>
@@ -7028,6 +7060,7 @@
             <button class="btn btn-sm btn-quiet" data-action="import-data">导入记录</button>
             <button class="btn btn-sm btn-quiet danger" data-action="reset-data">清空记录</button>
           </div>
+          <p class="mini-note">离线缓存：${offlineReady ? "已就绪，断网也能打开。" : "首次打开后自动准备；如果一直没就绪，刷新一次。"}</p>
         </aside>
       </div>`;
   }
@@ -8378,6 +8411,23 @@
       case "print":
         window.print();
         break;
+      case "install-app": {
+        if (!deferredInstallPrompt) {
+          toast("请用浏览器菜单“安装应用”或“添加到主屏幕”");
+          break;
+        }
+        const promptEvent = deferredInstallPrompt;
+        deferredInstallPrompt = null;
+        try {
+          promptEvent.prompt();
+          promptEvent.userChoice.then(function (choice) {
+            if (choice && choice.outcome === "accepted") toast("正在安装到桌面");
+          }).catch(function () { /* 用户取消或浏览器不支持 */ });
+        } catch (err) {
+          toast("请用浏览器菜单“安装应用”或“添加到主屏幕”");
+        }
+        break;
+      }
       case "import-data": {
         const input = $("#importFile");
         if (input) input.click();
@@ -8751,7 +8801,7 @@
 
     window.addEventListener("hashchange", function () {
       closeDrawer();
-      render();
+      render({ routeChange: true });
     });
   }
 
